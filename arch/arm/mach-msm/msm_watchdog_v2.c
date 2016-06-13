@@ -27,7 +27,10 @@
 #include <linux/platform_device.h>
 #include <mach/scm.h>
 #include <mach/msm_memory_dump.h>
-
+//ASUSDEBUG + jeffery_hu@asus.com
+#include <linux/asus_global.h>
+extern struct _asus_global asus_global;
+//ASUSDEBUG -
 #define MODULE_NAME "msm_watchdog"
 #define WDT0_ACCSCSSNBARK_INT 0
 #define TCSR_WDT_CFG	0x30
@@ -42,6 +45,8 @@
 #define SCM_SVC_SEC_WDOG_DIS	0x7
 
 static struct workqueue_struct *wdog_wq;
+struct msm_watchdog_data *g_wdog_dd = NULL;
+struct mutex g_pet_lock;
 
 struct msm_watchdog_data {
 	unsigned int __iomem phys_base;
@@ -109,6 +114,7 @@ static int msm_watchdog_resume(struct device *dev)
 {
 	struct msm_watchdog_data *wdog_dd =
 			(struct msm_watchdog_data *)dev_get_drvdata(dev);
+	printk("[msm_watchdog] in %s\n",__func__);
 	if (!enable)
 		return 0;
 	__raw_writel(1, wdog_dd->base + WDT0_EN);
@@ -273,7 +279,7 @@ static void ping_other_cpus(struct msm_watchdog_data *wdog_dd)
 	for_each_cpu(cpu, cpu_online_mask)
 		smp_call_function_single(cpu, keep_alive_response, wdog_dd, 1);
 }
-
+extern int watchdog_test; 
 static void pet_watchdog_work(struct work_struct *work)
 {
 	unsigned long delay_time;
@@ -281,11 +287,22 @@ static void pet_watchdog_work(struct work_struct *work)
 	struct msm_watchdog_data *wdog_dd = container_of(delayed_work,
 						struct msm_watchdog_data,
 							dogwork_struct);
+	if (watchdog_test){
+		printk("test watchdog function...\r\n");
+		printk("Wdog - STS: 0x%x, CTL: 0x%x, BARK TIME: 0x%x, BITE TIME: 0x%x",
+		__raw_readl(wdog_dd->base + WDT0_STS),
+		__raw_readl(wdog_dd->base + WDT0_EN),
+		__raw_readl(wdog_dd->base + WDT0_BARK_TIME),
+		__raw_readl(wdog_dd->base + WDT0_BITE_TIME));
+		return;
+	} 
 	delay_time = msecs_to_jiffies(wdog_dd->pet_time);
 	if (enable) {
+		mutex_lock(&g_pet_lock);
 		if (wdog_dd->do_ipi_ping)
 			ping_other_cpus(wdog_dd);
 		pet_watchdog(wdog_dd);
+		mutex_unlock(&g_pet_lock);
 	}
 	/* Check again before scheduling *
 	 * Could have been changed on other cpu */
@@ -315,6 +332,7 @@ static int msm_watchdog_remove(struct platform_device *pdev)
 	printk(KERN_INFO "MSM Watchdog Exit - Deactivated\n");
 	destroy_workqueue(wdog_wq);
 	kfree(wdog_dd);
+	g_wdog_dd = NULL;
 	return 0;
 }
 
@@ -369,6 +387,10 @@ static void configure_bark_dump(struct msm_watchdog_data *wdog_dd)
 	if (wdog_dd->scm_regsave) {
 		cmd_buf.addr = virt_to_phys(wdog_dd->scm_regsave);
 		cmd_buf.len  = PAGE_SIZE;
+		//ASUSDEBUG + jeffery_hu@asus.com
+		printk("scm_regsave = 0x%x,cmd_buf.addr = 0x%x\r\n",(unsigned int)wdog_dd->scm_regsave,(unsigned int)cmd_buf.addr);
+		asus_global.phycpucontextadd = cmd_buf.addr;
+		//ASUSDEBUG -
 		ret = scm_call(SCM_SVC_UTIL, SCM_SET_REGSAVE_CMD,
 					&cmd_buf, sizeof(cmd_buf), NULL, 0);
 		if (ret)
@@ -542,6 +564,8 @@ static int __devinit msm_watchdog_probe(struct platform_device *pdev)
 	wdog_dd->dev = &pdev->dev;
 	platform_set_drvdata(pdev, wdog_dd);
 	cpumask_clear(&wdog_dd->alive_mask);
+	g_wdog_dd = wdog_dd;
+	mutex_init(&g_pet_lock);
 	INIT_WORK(&wdog_dd->init_dogwork_struct, init_watchdog_work);
 	INIT_DELAYED_WORK(&wdog_dd->dogwork_struct, pet_watchdog_work);
 	queue_work_on(0, wdog_wq, &wdog_dd->init_dogwork_struct);
@@ -551,6 +575,22 @@ err:
 	kzfree(wdog_dd);
 	return ret;
 }
+
+void asus_pet_watchdog(void) {
+	if(g_wdog_dd && enable) {
+		mutex_lock(&g_pet_lock);
+		if (g_wdog_dd->do_ipi_ping)
+			ping_other_cpus(g_wdog_dd);
+		pet_watchdog(g_wdog_dd);
+		mutex_unlock(&g_pet_lock);
+	}else {
+		if(!enable)
+			pr_err("watchdog was disabled\n");
+		else
+			pr_err("watchdog driver probe failed\n");
+	}	
+}
+EXPORT_SYMBOL(asus_pet_watchdog);
 
 static const struct dev_pm_ops msm_watchdog_dev_pm_ops = {
 	.suspend_noirq = msm_watchdog_suspend,

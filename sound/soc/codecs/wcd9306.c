@@ -39,6 +39,36 @@
 #include "wcd9xxx-resmgr.h"
 #include "wcd9xxx-common.h"
 
+// wendy4_wang@asus.com
+#include <linux/proc_fs.h>
+#define TABLA_NUM_REGISTERS 0x400
+#define TABLA_CACHE_SIZE TABLA_NUM_REGISTERS
+
+#include <mach/gpiomux.h>
+#include <linux/mfd/pm8xxx/gpio.h>
+#include <linux/switch.h>
+#include <linux/jiffies.h>
+
+struct tapan_priv *g_tapan;
+
+struct timer_list hs_timer;
+struct timer_list button_timer;
+static unsigned long hs_jiffies;
+static unsigned long button_jiffies;
+
+static struct work_struct button_press_work;
+static struct work_struct button_release_work;
+static struct work_struct report_hs_event_work;
+static int hook_irq_balance = 1;
+static int hook_irq_wake = 0;
+static int device_wake = 1;
+
+static int hs_event_state;
+static int hp_sent_count = 0;
+static int hs_sent_count = 0;
+extern struct wcd9306_hs_struct wcd9306_hs_data;
+//wendy4_wang@asus.com
+
 #define TAPAN_HPH_PA_SETTLE_COMP_ON 3000
 #define TAPAN_HPH_PA_SETTLE_COMP_OFF 13000
 
@@ -303,6 +333,11 @@ struct tapan_priv {
 	int aux_pga_cnt;
 	u8 aux_l_gain;
 	u8 aux_r_gain;
+
+// wendy4_wang@asus.com
+	struct gpio_switch_data *headset_jack;
+	int button_press;
+// wendy4_wang@asus.com
 
 	bool spkr_pa_widget_on;
 
@@ -1996,6 +2031,8 @@ static int tapan_codec_enable_spk_pa(struct snd_soc_dapm_widget *w,
 	case SND_SOC_DAPM_PRE_PMU:
 		tapan->spkr_pa_widget_on = true;
 		snd_soc_update_bits(codec, TAPAN_A_SPKR_DRV_EN, 0x80, 0x80);
+		//mei_huang@asus.com for maxxaudio
+		apply_wcd9306_spk_gain();
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		tapan->spkr_pa_widget_on = false;
@@ -2229,13 +2266,15 @@ static int tapan_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 			snd_soc_update_bits(codec, micb_int_reg, 0x3, 0x3);
 
 		if (micb_ctl_reg == TAPAN_A_MICB_2_CTL) {
-			if (++tapan->micb_2_users == 1)
-				wcd9xxx_resmgr_add_cond_update_bits(
+			/*if (++tapan->micb_2_users == 1)
+				{wcd9xxx_resmgr_add_cond_update_bits(
 						&tapan->resmgr,
 						WCD9XXX_COND_HPH_MIC,
 						micb_ctl_reg, w->shift,
 						false);
-			pr_debug("%s: micb_2_users %d\n", __func__,
+					pr_err("%s: wcd9xxx_resmgr_add_cond_update_bits false\n", __func__);	
+				}*/
+			pr_err("%s: micb_2_users %d\n", __func__,
 				 tapan->micb_2_users);
 		} else
 			snd_soc_update_bits(codec, micb_ctl_reg, 1 << w->shift,
@@ -4634,16 +4673,16 @@ static const struct snd_soc_dapm_widget tapan_common_dapm_widgets[] = {
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_INPUT("AMIC2"),
-	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 External", SND_SOC_NOPM, 7, 0,
+	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 External", TAPAN_A_MICB_2_CTL, 7, 0,
 		tapan_codec_enable_micbias, SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMU |	SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 Internal1", SND_SOC_NOPM, 7, 0,
+	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 Internal1", TAPAN_A_MICB_2_CTL, 7, 0,
 		tapan_codec_enable_micbias, SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 Internal2", SND_SOC_NOPM, 7, 0,
+	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 Internal2", TAPAN_A_MICB_2_CTL, 7, 0,
 		tapan_codec_enable_micbias, SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 Internal3", SND_SOC_NOPM, 7, 0,
+	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 Internal3", TAPAN_A_MICB_2_CTL, 7, 0,
 		tapan_codec_enable_micbias, SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
 
@@ -5683,6 +5722,856 @@ static int wcd9xxx_ssr_register(struct wcd9xxx *control,
 	return 0;
 }
 
+// wendy4_wang@asus.com
+void report_press_event(struct work_struct *work) {
+	button_jiffies = jiffies;
+
+	msleep(100);
+	if (gpio_get_value(wcd9306_hs_data.jack_gpio)){
+		printk("---%s---NO JACK_IN---\n",__func__);
+		return;
+	} else {
+		if (&g_tapan->mbhc.button_jack) {
+			if(hs_jiffies == 0){
+				printk("---%s---hs_jiffies = 0---\n",__func__);
+				return;
+			} else if(time_is_before_jiffies(hs_jiffies + 2*HZ)) {
+				snd_soc_jack_report_no_dapm(&g_tapan->mbhc.button_jack,
+							SND_JACK_BTN_0,SND_JACK_BTN_0);
+				printk("---[%s] press---\n",__func__);
+            } else {
+				printk("---%s---in debounce time---\n",__func__);
+				if (g_tapan->button_press == 0) {
+					g_tapan->button_press += 1;
+					printk("---[%s] press---\n",__func__);
+				} else {
+					g_tapan->button_press = 0;
+					printk("---[%s] maybe is fake PRESS report---\n",__func__);
+				}
+			}
+		} else {
+			printk("---[%s] no define g_tapan->mbhc_cfg---\n",__func__);
+		}
+	}
+}
+
+void report_release_event(struct work_struct *work) {
+	msleep(100);
+	if (gpio_get_value(wcd9306_hs_data.jack_gpio))
+		return;
+    else {
+		if (&g_tapan->mbhc.button_jack) {
+			if(time_is_before_jiffies(hs_jiffies + 2*HZ)) {
+				snd_soc_jack_report_no_dapm(&g_tapan->mbhc.button_jack,0,SND_JACK_BTN_0);
+				printk("---[%s] release---\n",__func__);
+			} else {
+				if(g_tapan->button_press == 1) {
+					g_tapan->button_press -= 1;
+					snd_soc_jack_report_no_dapm(&g_tapan->mbhc.button_jack,
+								SND_JACK_BTN_0,SND_JACK_BTN_0);
+					snd_soc_jack_report_no_dapm(&g_tapan->mbhc.button_jack
+								,0,SND_JACK_BTN_0);
+					printk("---[%s] release---\n",__func__);
+				} else {
+					g_tapan->button_press = 0;
+					printk("---[%s] release---\n",__func__);
+				}
+			}
+		} else{
+			printk("---[%s] no define g_tapan->mbhc_cfg---\n",__func__);
+		}
+	}
+}
+
+static void button_timer_fun(unsigned long _data) {
+	int state;
+	if (time_is_before_jiffies(hs_jiffies + HZ/2)) {
+		state = gpio_get_value(wcd9306_hs_data.button_gpio);
+		if (state==0)
+			schedule_work(&button_release_work);
+		else
+			schedule_work(&button_press_work);
+	}
+}
+
+void report_hs_event(struct work_struct *work)
+{
+	int state;
+	g_tapan->button_press = 0;
+	if (g_user_dbg_mode) {
+		//printk("Debug Mode, disable Headset Function!!!\n");
+		return;
+	}
+	state = !gpio_get_value(wcd9306_hs_data.jack_gpio);
+	if (state == 0) {
+		hs_event_state = 0;
+		switch_set_state(&g_tapan->headset_jack->sdev, state);
+
+
+		if (wcd9306_hs_data.hsmic_bias >= 0) {
+			gpio_direction_output(wcd9306_hs_data.hsmic_bias, 0);
+		} else { //non gpio
+			wcd9xxx_enable_micbias(&(g_tapan->mbhc), 0);
+		}
+
+		button_jiffies = hs_jiffies = 0;
+
+		hp_sent_count = 0;
+		hs_sent_count = 0;
+		printk("---[%s]HS detect removal send 0!!! ---\n",__func__);
+	} else {
+		hs_event_state = 1;
+
+		if (wcd9306_hs_data.hsmic_bias >= 0) {
+			gpio_direction_output(wcd9306_hs_data.hsmic_bias, 1);
+		} else { //non gpio
+			wcd9xxx_enable_micbias(&(g_tapan->mbhc), 1);
+		}
+
+		msleep(50);
+		hs_jiffies = jiffies;
+
+		while(hook_irq_balance >= 1) {
+			enable_irq(gpio_to_irq(wcd9306_hs_data.button_gpio));
+			hook_irq_balance -= 1;
+		}
+
+		if (!gpio_get_value(wcd9306_hs_data.button_gpio)) { //headset
+			hs_sent_count++;
+			if (hp_sent_count == 0){
+				switch_set_state(&g_tapan->headset_jack->sdev, 1);
+				printk("---[%s]HS insertion-(1) ---\n",__func__);
+			}
+			if (hp_sent_count >= 1){
+				switch_set_state(&g_tapan->headset_jack->sdev, 0);
+				printk("---[%s]send fake removal before sending ''Headset'' event",__func__);
+				switch_set_state(&g_tapan->headset_jack->sdev, 1);
+				hp_sent_count = 0;
+			}
+		} else { //headphone
+			hp_sent_count++;
+			if (hs_sent_count == 0) {
+				switch_set_state(&g_tapan->headset_jack->sdev, 2);
+				printk("---[%s]HP insertion-(2) ---\n",__func__);
+			}
+			if (hs_sent_count >= 1) {
+				switch_set_state(&g_tapan->headset_jack->sdev, 0);
+				printk("---[%s]send fake removal before sending ''Headphone'' event",__func__);
+				switch_set_state(&g_tapan->headset_jack->sdev, 2);
+				hs_sent_count = 0;
+			}
+			if (wcd9306_hs_data.hsmic_bias >= 0) {
+				gpio_direction_output(wcd9306_hs_data.hsmic_bias, 0);
+			} else { //non gpio
+				wcd9xxx_enable_micbias(&(g_tapan->mbhc), 0);
+			}
+		}
+	}
+}
+
+static void hs_timer_fun(unsigned long _data)
+{
+	schedule_work(&report_hs_event_work);
+}
+
+static irqreturn_t tabla_hs_detect_irq(int irq, void *data)
+{
+	int state;//tyree_liu@asus.com++
+	disable_irq(gpio_to_irq(wcd9306_hs_data.button_gpio));
+	hook_irq_balance += 1;
+	state = !gpio_get_value(wcd9306_hs_data.jack_gpio);
+    //tyree_liu++;for reduce headset noise;
+    if(state == 0)
+        mod_timer(&hs_timer,jiffies + msecs_to_jiffies(100));
+    else
+    //tyree_liu++;for reduce headset noise;
+	mod_timer(&hs_timer,jiffies + msecs_to_jiffies(1000));
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t tabla_button_detect_irq(int irq, void *data)
+{
+	mod_timer(&button_timer,jiffies + msecs_to_jiffies(50));
+	return IRQ_HANDLED;
+}
+
+//audio_debug
+#define Audio_debug_PROC_FILE  "driver/audio_debug"
+static struct proc_dir_entry *audio_debug_proc_file;
+static struct delayed_work g_amp_dwork;  //mei_huang@asus.com for maxxaudio on
+static struct work_struct  g_amp_work;   //mei_huang@asus.com for maxxaudio off
+
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/file.h>
+static mm_segment_t oldfs;
+static void initKernelEnv(void)
+{
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
+}
+
+static void deinitKernelEnv(void)
+{
+	set_fs(oldfs);
+}
+
+static int tabla_reg_dump[TABLA_CACHE_SIZE] = {
+	TAPAN_A_CHIP_CTL,
+	TAPAN_A_CHIP_STATUS,
+	TAPAN_A_CHIP_ID_BYTE_0,
+	TAPAN_A_CHIP_ID_BYTE_1,
+	TAPAN_A_CHIP_ID_BYTE_2,
+	TAPAN_A_CHIP_ID_BYTE_3,
+	TAPAN_A_CHIP_VERSION,
+	TAPAN_A_CHIP_DEBUG_CTL,
+	TAPAN_A_SLAVE_ID_1,
+	TAPAN_A_SLAVE_ID_2,
+	TAPAN_A_SLAVE_ID_3,
+	TAPAN_A_PIN_CTL_OE0,
+	TAPAN_A_PIN_CTL_DATA0,
+	TAPAN_A_HDRIVE_GENERIC,
+	TAPAN_A_HDRIVE_OVERRIDE,
+	TAPAN_A_ANA_CSR_WAIT_STATE,
+	TAPAN_A_PROCESS_MONITOR_CTL0,
+	TAPAN_A_PROCESS_MONITOR_CTL1,
+	TAPAN_A_PROCESS_MONITOR_CTL2,
+	TAPAN_A_PROCESS_MONITOR_CTL3,
+	TAPAN_A_QFUSE_CTL,
+	TAPAN_A_QFUSE_STATUS,
+	TAPAN_A_QFUSE_DATA_OUT0,
+	TAPAN_A_QFUSE_DATA_OUT1,
+	TAPAN_A_QFUSE_DATA_OUT2,
+	TAPAN_A_QFUSE_DATA_OUT3,
+	TAPAN_A_QFUSE_DATA_OUT4,
+	TAPAN_A_QFUSE_DATA_OUT5,
+	TAPAN_A_QFUSE_DATA_OUT6,
+	TAPAN_A_QFUSE_DATA_OUT7,
+	TAPAN_A_CDC_CTL,
+	TAPAN_A_LEAKAGE_CTL,
+	TAPAN_A_INTR_MODE,
+	TAPAN_A_INTR_MASK0,
+	TAPAN_A_INTR_MASK1,
+	TAPAN_A_INTR_MASK2,
+	TAPAN_A_INTR_MASK3,
+	TAPAN_A_INTR_STATUS0,
+	TAPAN_A_INTR_STATUS1,
+	TAPAN_A_INTR_STATUS2,
+	TAPAN_A_INTR_STATUS3,
+	TAPAN_A_INTR_CLEAR0,
+	TAPAN_A_INTR_CLEAR1,
+	TAPAN_A_INTR_CLEAR2,
+	TAPAN_A_INTR_CLEAR3,
+	TAPAN_A_INTR_LEVEL0,
+	TAPAN_A_INTR_LEVEL1,
+	TAPAN_A_INTR_LEVEL2,
+	TAPAN_A_INTR_LEVEL3,
+	TAPAN_A_INTR_TEST0,
+	TAPAN_A_INTR_TEST1,
+	TAPAN_A_INTR_TEST2,
+	TAPAN_A_INTR_TEST3,
+	TAPAN_A_INTR_SET0,
+	TAPAN_A_INTR_SET1,
+	TAPAN_A_INTR_SET2,
+	TAPAN_A_INTR_SET3,
+	TAPAN_A_INTR_DESTN0,
+	TAPAN_A_INTR_DESTN1,
+	TAPAN_A_INTR_DESTN2,
+	TAPAN_A_INTR_DESTN3,
+	TAPAN_A_CDC_DMIC_DATA0_MODE,
+	TAPAN_A_CDC_DMIC_CLK0_MODE,
+	TAPAN_A_CDC_DMIC_DATA1_MODE,
+	TAPAN_A_CDC_DMIC_CLK1_MODE,
+	TAPAN_A_CDC_INTR_MODE,
+	TAPAN_A_BIAS_REF_CTL,
+	TAPAN_A_BIAS_CENTRAL_BG_CTL,
+	TAPAN_A_BIAS_PRECHRG_CTL,
+	TAPAN_A_BIAS_CURR_CTL_1,
+	TAPAN_A_BIAS_CURR_CTL_2,
+	TAPAN_A_BIAS_OSC_BG_CTL,
+	TAPAN_A_CLK_BUFF_EN1,
+	TAPAN_A_CLK_BUFF_EN2,
+	TAPAN_A_LDO_H_MODE_1,
+	TAPAN_A_LDO_H_MODE_2,
+	TAPAN_A_LDO_H_LOOP_CTL,
+	TAPAN_A_LDO_H_COMP_1,
+	TAPAN_A_LDO_H_COMP_2,
+	TAPAN_A_LDO_H_BIAS_1,
+	TAPAN_A_LDO_H_BIAS_2,
+	TAPAN_A_LDO_H_BIAS_3,
+	TAPAN_A_MICB_CFILT_1_CTL,
+	TAPAN_A_MICB_CFILT_1_VAL,
+	TAPAN_A_MICB_CFILT_1_PRECHRG,
+	TAPAN_A_MICB_1_CTL,
+	TAPAN_A_MICB_1_INT_RBIAS,
+	TAPAN_A_MICB_1_MBHC,
+	TAPAN_A_MICB_CFILT_2_CTL,
+	TAPAN_A_MICB_CFILT_2_VAL,
+	TAPAN_A_MICB_CFILT_2_PRECHRG,
+	TAPAN_A_MICB_2_CTL,
+	TAPAN_A_MICB_2_INT_RBIAS,
+	TAPAN_A_MICB_2_MBHC,
+	TAPAN_A_MICB_CFILT_3_CTL,
+	TAPAN_A_MICB_CFILT_3_VAL,
+	TAPAN_A_MICB_CFILT_3_PRECHRG,
+	TAPAN_A_MICB_3_CTL,
+	TAPAN_A_MICB_3_INT_RBIAS,
+	TAPAN_A_MICB_3_MBHC,
+	TAPAN_A_MBHC_INSERT_DETECT,
+	TAPAN_A_MBHC_INSERT_DET_STATUS,
+	TAPAN_A_TX_COM_BIAS,
+	TAPAN_A_MBHC_SCALING_MUX_1,
+	TAPAN_A_MBHC_SCALING_MUX_2,
+	TAPAN_A_RESERVED_MAD_ANA_CTRL,
+	TAPAN_A_TX_SUP_SWITCH_CTRL_1,
+	TAPAN_A_TX_SUP_SWITCH_CTRL_2,
+	TAPAN_A_TX_1_EN,
+	TAPAN_A_TX_2_EN,
+	TAPAN_A_TX_1_2_ADC_CH1,
+	TAPAN_A_TX_1_2_ADC_CH2,
+	TAPAN_A_TX_1_2_ATEST_REFCTRL,
+	TAPAN_A_TX_1_2_TEST_CTL,
+	TAPAN_A_TX_1_2_TEST_BLOCK_EN,
+	TAPAN_A_TX_1_2_TXFE_CLKDIV,
+	TAPAN_A_TX_1_2_SAR_ERR_CH1,
+	TAPAN_A_TX_1_2_SAR_ERR_CH2,
+	TAPAN_A_TX_3_EN,
+	TAPAN_A_TX_1_2_TEST_EN,
+	TAPAN_A_TX_4_5_TXFE_SC_CTL,
+	TAPAN_A_TX_4_5_TEST_EN,
+	TAPAN_A_TX_4_EN,
+	TAPAN_A_TX_5_EN,
+	TAPAN_A_TX_4_5_ADC_CH4,
+	TAPAN_A_TX_4_5_ADC_CH5,
+	TAPAN_A_TX_4_5_ATEST_REFCTRL,
+	TAPAN_A_TX_4_5_TEST_CTL,
+	TAPAN_A_TX_4_5_TEST_BLOCK_EN,
+	TAPAN_A_TX_4_5_TXFE_CKDIV,
+	TAPAN_A_TX_4_5_SAR_ERR_CH4,
+	TAPAN_A_TX_4_5_SAR_ERR_CH5,
+	TAPAN_A_TX_7_MBHC_EN,
+	TAPAN_A_TX_7_MBHC_ATEST_REFCTRL,
+	TAPAN_A_TX_7_MBHC_ADC,
+	TAPAN_A_TX_7_MBHC_TEST_CTL,
+	TAPAN_A_TX_7_MBHC_SAR_ERR,
+	TAPAN_A_TX_7_TXFE_CLKDIV,
+	TAPAN_A_BUCK_MODE_1,
+	TAPAN_A_BUCK_MODE_2,
+	TAPAN_A_BUCK_MODE_3,
+	TAPAN_A_BUCK_MODE_4,
+	TAPAN_A_BUCK_MODE_5,
+	TAPAN_A_BUCK_CTRL_VCL_1,
+	TAPAN_A_BUCK_CTRL_VCL_2,
+	TAPAN_A_BUCK_CTRL_VCL_3,
+	TAPAN_A_BUCK_CTRL_CCL_1,
+	TAPAN_A_BUCK_CTRL_CCL_2,
+	TAPAN_A_BUCK_CTRL_CCL_3,
+	TAPAN_A_BUCK_CTRL_CCL_4,
+	TAPAN_A_BUCK_CTRL_PWM_DRVR_1,
+	TAPAN_A_BUCK_CTRL_PWM_DRVR_2,
+	TAPAN_A_BUCK_CTRL_PWM_DRVR_3,
+	TAPAN_A_BUCK_TMUX_A_D,
+	TAPAN_A_NCP_BUCKREF,
+	TAPAN_A_NCP_EN,
+	TAPAN_A_NCP_CLK,
+	TAPAN_A_NCP_STATIC,
+	TAPAN_A_NCP_VTH_LOW,
+	TAPAN_A_NCP_VTH_HIGH,
+	TAPAN_A_NCP_ATEST,
+	TAPAN_A_NCP_DTEST,
+	TAPAN_A_NCP_DLY1,
+	TAPAN_A_NCP_DLY2,
+	TAPAN_A_RX_AUX_SW_CTL,
+	TAPAN_A_RX_PA_AUX_IN_CONN,
+	TAPAN_A_RX_COM_TIMER_DIV,
+	TAPAN_A_RX_COM_OCP_CTL,
+	TAPAN_A_RX_COM_OCP_COUNT,
+	TAPAN_A_RX_COM_DAC_CTL,
+	TAPAN_A_RX_COM_BIAS,
+	TAPAN_A_RX_HPH_AUTO_CHOP,
+	TAPAN_A_RX_HPH_CHOP_CTL,
+	TAPAN_A_RX_HPH_BIAS_PA,
+	TAPAN_A_RX_HPH_BIAS_LDO,
+	TAPAN_A_RX_HPH_BIAS_CNP,
+	TAPAN_A_RX_HPH_BIAS_WG_OCP,
+	TAPAN_A_RX_HPH_OCP_CTL,
+	TAPAN_A_RX_HPH_CNP_EN,
+	TAPAN_A_RX_HPH_CNP_WG_CTL,
+	TAPAN_A_RX_HPH_CNP_WG_TIME,
+	TAPAN_A_RX_HPH_L_GAIN,
+	TAPAN_A_RX_HPH_L_TEST,
+	TAPAN_A_RX_HPH_L_PA_CTL,
+	TAPAN_A_RX_HPH_L_DAC_CTL,
+	TAPAN_A_RX_HPH_L_ATEST,
+	TAPAN_A_RX_HPH_L_STATUS,
+	TAPAN_A_RX_HPH_R_GAIN,
+	TAPAN_A_RX_HPH_R_TEST,
+	TAPAN_A_RX_HPH_R_PA_CTL,
+	TAPAN_A_RX_HPH_R_DAC_CTL,
+	TAPAN_A_RX_HPH_R_ATEST,
+	TAPAN_A_RX_HPH_R_STATUS,
+	TAPAN_A_RX_EAR_BIAS_PA,
+	TAPAN_A_RX_EAR_BIAS_CMBUFF,
+	TAPAN_A_RX_EAR_EN,
+	TAPAN_A_RX_EAR_GAIN,
+	TAPAN_A_RX_EAR_CMBUFF,
+	TAPAN_A_RX_EAR_ICTL,
+	TAPAN_A_RX_EAR_CCOMP,
+	TAPAN_A_RX_EAR_VCM,
+	TAPAN_A_RX_EAR_CNP,
+	TAPAN_A_RX_EAR_DAC_CTL_ATEST,
+	TAPAN_A_RX_EAR_STATUS,
+	TAPAN_A_RX_LINE_BIAS_PA,
+	TAPAN_A_RX_BUCK_BIAS1,
+	TAPAN_A_RX_BUCK_BIAS2,
+	TAPAN_A_RX_LINE_COM,
+	TAPAN_A_RX_LINE_CNP_EN,
+	TAPAN_A_RX_LINE_CNP_WG_CTL,
+	TAPAN_A_RX_LINE_CNP_WG_TIME,
+	TAPAN_A_RX_LINE_1_GAIN,
+	TAPAN_A_RX_LINE_1_TEST,
+	TAPAN_A_RX_LINE_1_DAC_CTL,
+	TAPAN_A_RX_LINE_1_STATUS,
+	TAPAN_A_RX_LINE_2_GAIN,
+	TAPAN_A_RX_LINE_2_TEST,
+	TAPAN_A_RX_LINE_2_DAC_CTL,
+	TAPAN_A_RX_LINE_2_STATUS,
+	TAPAN_A_RX_LINE_CNP_DBG,
+	TAPAN_A_SPKR_DRV_EN,
+	TAPAN_A_SPKR_DRV_GAIN,
+	TAPAN_A_SPKR_DRV_DAC_CTL,
+	TAPAN_A_SPKR_DRV_OCP_CTL,
+	TAPAN_A_SPKR_DRV_CLIP_DET,
+	TAPAN_A_SPKR_DRV_IEC,
+	TAPAN_A_SPKR_DRV_DBG_DAC,
+	TAPAN_A_SPKR_DRV_DBG_PA,
+	TAPAN_A_SPKR_DRV_DBG_PWRSTG,
+	TAPAN_A_SPKR_DRV_BIAS_LDO,
+	TAPAN_A_SPKR_DRV_BIAS_INT,
+	TAPAN_A_SPKR_DRV_BIAS_PA,
+	TAPAN_A_SPKR_DRV_STATUS_OCP,
+	TAPAN_A_SPKR_DRV_STATUS_PA,
+	TAPAN_A_RC_OSC_FREQ,
+	TAPAN_A_RC_OSC_TEST,
+	TAPAN_A_RC_OSC_STATUS,
+	TAPAN_A_RC_OSC_TUNER,
+	TAPAN_A_MBHC_HPH,
+	TAPAN_A_CDC_ANC1_B1_CTL,
+	TAPAN_A_CDC_ANC2_B1_CTL,
+	TAPAN_A_CDC_ANC1_SHIFT,
+	TAPAN_A_CDC_ANC2_SHIFT,
+	TAPAN_A_CDC_ANC1_IIR_B1_CTL,
+	TAPAN_A_CDC_ANC2_IIR_B1_CTL,
+	TAPAN_A_CDC_ANC1_IIR_B2_CTL,
+	TAPAN_A_CDC_ANC2_IIR_B2_CTL,
+	TAPAN_A_CDC_ANC1_IIR_B3_CTL,
+	TAPAN_A_CDC_ANC2_IIR_B3_CTL,
+	TAPAN_A_CDC_ANC1_LPF_B1_CTL,
+	TAPAN_A_CDC_ANC2_LPF_B1_CTL,
+	TAPAN_A_CDC_ANC1_LPF_B2_CTL,
+	TAPAN_A_CDC_ANC2_LPF_B2_CTL,
+	TAPAN_A_CDC_ANC1_SPARE,
+	TAPAN_A_CDC_ANC2_SPARE,
+	TAPAN_A_CDC_ANC1_SMLPF_CTL,
+	TAPAN_A_CDC_ANC2_SMLPF_CTL,
+	TAPAN_A_CDC_ANC1_DCFLT_CTL,
+	TAPAN_A_CDC_ANC2_DCFLT_CTL,
+	TAPAN_A_CDC_ANC1_GAIN_CTL,
+	TAPAN_A_CDC_ANC2_GAIN_CTL,
+	TAPAN_A_CDC_ANC1_B2_CTL,
+	TAPAN_A_CDC_ANC2_B2_CTL,
+	TAPAN_A_CDC_TX1_VOL_CTL_TIMER,
+	TAPAN_A_CDC_TX2_VOL_CTL_TIMER,
+	TAPAN_A_CDC_TX3_VOL_CTL_TIMER,
+	TAPAN_A_CDC_TX4_VOL_CTL_TIMER,
+	TAPAN_A_CDC_TX1_VOL_CTL_GAIN,
+	TAPAN_A_CDC_TX2_VOL_CTL_GAIN,
+	TAPAN_A_CDC_TX3_VOL_CTL_GAIN,
+	TAPAN_A_CDC_TX4_VOL_CTL_GAIN,
+	TAPAN_A_CDC_TX1_VOL_CTL_CFG,
+	TAPAN_A_CDC_TX2_VOL_CTL_CFG,
+	TAPAN_A_CDC_TX3_VOL_CTL_CFG,
+	TAPAN_A_CDC_TX4_VOL_CTL_CFG,
+	TAPAN_A_CDC_TX1_MUX_CTL,
+	TAPAN_A_CDC_TX2_MUX_CTL,
+	TAPAN_A_CDC_TX3_MUX_CTL,
+	TAPAN_A_CDC_TX4_MUX_CTL,
+	TAPAN_A_CDC_TX1_CLK_FS_CTL,
+	TAPAN_A_CDC_TX2_CLK_FS_CTL,
+	TAPAN_A_CDC_TX3_CLK_FS_CTL,
+	TAPAN_A_CDC_TX4_CLK_FS_CTL,
+	TAPAN_A_CDC_TX1_DMIC_CTL,
+	TAPAN_A_CDC_TX2_DMIC_CTL,
+	TAPAN_A_CDC_TX3_DMIC_CTL,
+	TAPAN_A_CDC_TX4_DMIC_CTL,
+	TAPAN_A_CDC_DEBUG_B1_CTL,
+	TAPAN_A_CDC_DEBUG_B2_CTL,
+	TAPAN_A_CDC_DEBUG_B3_CTL,
+	TAPAN_A_CDC_DEBUG_B4_CTL,
+	TAPAN_A_CDC_DEBUG_B5_CTL,
+	TAPAN_A_CDC_DEBUG_B6_CTL,
+	TAPAN_A_CDC_DEBUG_B7_CTL,
+	TAPAN_A_CDC_SRC1_PDA_CFG,
+	TAPAN_A_CDC_SRC2_PDA_CFG,
+	TAPAN_A_CDC_SRC1_FS_CTL,
+	TAPAN_A_CDC_SRC2_FS_CTL,
+	TAPAN_A_CDC_RX1_B1_CTL,
+	TAPAN_A_CDC_RX2_B1_CTL,
+	TAPAN_A_CDC_RX3_B1_CTL,
+	TAPAN_A_CDC_RX4_B1_CTL,
+	TAPAN_A_CDC_RX1_B2_CTL,
+	TAPAN_A_CDC_RX2_B2_CTL,
+	TAPAN_A_CDC_RX3_B2_CTL,
+	TAPAN_A_CDC_RX4_B2_CTL,
+	TAPAN_A_CDC_RX1_B3_CTL,
+	TAPAN_A_CDC_RX2_B3_CTL,
+	TAPAN_A_CDC_RX3_B3_CTL,
+	TAPAN_A_CDC_RX4_B3_CTL,
+	TAPAN_A_CDC_RX1_B4_CTL,
+	TAPAN_A_CDC_RX2_B4_CTL,
+	TAPAN_A_CDC_RX3_B4_CTL,
+	TAPAN_A_CDC_RX4_B4_CTL,
+	TAPAN_A_CDC_RX1_B5_CTL,
+	TAPAN_A_CDC_RX2_B5_CTL,
+	TAPAN_A_CDC_RX3_B5_CTL,
+	TAPAN_A_CDC_RX4_B5_CTL,
+	TAPAN_A_CDC_RX1_B6_CTL,
+	TAPAN_A_CDC_RX2_B6_CTL,
+	TAPAN_A_CDC_RX3_B6_CTL,
+	TAPAN_A_CDC_RX4_B6_CTL,
+	TAPAN_A_CDC_RX1_VOL_CTL_B1_CTL,
+	TAPAN_A_CDC_RX2_VOL_CTL_B1_CTL,
+	TAPAN_A_CDC_RX3_VOL_CTL_B1_CTL,
+	TAPAN_A_CDC_RX4_VOL_CTL_B1_CTL,
+	TAPAN_A_CDC_RX1_VOL_CTL_B2_CTL,
+	TAPAN_A_CDC_RX2_VOL_CTL_B2_CTL,
+	TAPAN_A_CDC_RX3_VOL_CTL_B2_CTL,
+	TAPAN_A_CDC_RX4_VOL_CTL_B2_CTL,
+	TAPAN_A_CDC_CLK_ANC_RESET_CTL,
+	TAPAN_A_CDC_CLK_RX_RESET_CTL,
+	TAPAN_A_CDC_CLK_TX_RESET_B1_CTL ,
+	TAPAN_A_CDC_CLK_TX_RESET_B2_CTL,
+	TAPAN_A_CDC_CLK_DMIC_B1_CTL,
+	TAPAN_A_CDC_CLK_DMIC_B2_CTL,
+	TAPAN_A_CDC_CLK_I2S_CTL,
+	TAPAN_A_CDC_CLK_OTHR_RESET_B1_CTL,
+	TAPAN_A_CDC_CLK_OTHR_RESET_B2_CTL,
+	TAPAN_A_CDC_CLK_TX_CLK_EN_B1_CTL,
+	TAPAN_A_CDC_CLK_TX_CLK_EN_B2_CTL,
+	TAPAN_A_CDC_CLK_OTHR_CTL,
+	TAPAN_A_CDC_CLK_RDAC_CLK_EN_CTL,
+	TAPAN_A_CDC_CLK_ANC_CLK_EN_CTL,
+	TAPAN_A_CDC_CLK_RX_B1_CTL,
+	TAPAN_A_CDC_CLK_RX_B2_CTL,
+	TAPAN_A_CDC_CLK_MCLK_CTL,
+	TAPAN_A_CDC_CLK_PDM_CTL,
+	TAPAN_A_CDC_CLK_SD_CTL,
+	TAPAN_A_CDC_CLK_POWER_CTL,
+	TAPAN_A_CDC_CLSH_B1_CTL ,
+	TAPAN_A_CDC_CLSH_B2_CTL,
+	TAPAN_A_CDC_CLSH_B3_CTL,
+	TAPAN_A_CDC_CLSH_BUCK_NCP_VARS,
+	TAPAN_A_CDC_CLSH_IDLE_HPH_THSD,
+	TAPAN_A_CDC_CLSH_IDLE_EAR_THSD,
+	TAPAN_A_CDC_CLSH_FCLKONLY_HPH_THSD,
+	TAPAN_A_CDC_CLSH_FCLKONLY_EAR_THSD,
+	TAPAN_A_CDC_CLSH_K_ADDR,
+	TAPAN_A_CDC_CLSH_K_DATA ,
+	TAPAN_A_CDC_CLSH_I_PA_FACT_HPH_L,
+	TAPAN_A_CDC_CLSH_I_PA_FACT_HPH_U,
+	TAPAN_A_CDC_CLSH_I_PA_FACT_EAR_L,
+	TAPAN_A_CDC_CLSH_I_PA_FACT_EAR_U,
+	TAPAN_A_CDC_CLSH_V_PA_HD_EAR,
+	TAPAN_A_CDC_CLSH_V_PA_HD_HPH,
+	TAPAN_A_CDC_CLSH_V_PA_MIN_EAR,
+	TAPAN_A_CDC_CLSH_V_PA_MIN_HPH,
+	TAPAN_A_CDC_IIR1_GAIN_B1_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B1_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_B2_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B2_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_B3_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B3_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_B4_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B4_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_B5_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B5_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_B6_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B6_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_B7_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B7_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_B8_CTL,
+	TAPAN_A_CDC_IIR2_GAIN_B8_CTL,
+	TAPAN_A_CDC_IIR1_CTL,
+	TAPAN_A_CDC_IIR2_CTL,
+	TAPAN_A_CDC_IIR1_GAIN_TIMER_CTL ,
+	TAPAN_A_CDC_IIR2_GAIN_TIMER_CTL,
+	TAPAN_A_CDC_IIR1_COEF_B1_CTL,
+	TAPAN_A_CDC_IIR2_COEF_B1_CTL,
+	TAPAN_A_CDC_IIR1_COEF_B2_CTL,
+	TAPAN_A_CDC_IIR2_COEF_B2_CTL,
+	TAPAN_A_CDC_TOP_GAIN_UPDATE,
+	TAPAN_A_CDC_COMP0_B1_CTL,
+	TAPAN_A_CDC_COMP1_B1_CTL,
+	TAPAN_A_CDC_COMP2_B1_CTL,
+	TAPAN_A_CDC_COMP0_B2_CTL,
+	TAPAN_A_CDC_COMP1_B2_CTL,
+	TAPAN_A_CDC_COMP2_B2_CTL,
+	TAPAN_A_CDC_COMP0_B3_CTL,
+	TAPAN_A_CDC_COMP1_B3_CTL,
+	TAPAN_A_CDC_COMP2_B3_CTL,
+	TAPAN_A_CDC_COMP0_B4_CTL,
+	TAPAN_A_CDC_COMP1_B4_CTL,
+	TAPAN_A_CDC_COMP2_B4_CTL,
+	TAPAN_A_CDC_COMP0_B5_CTL,
+	TAPAN_A_CDC_COMP1_B5_CTL,
+	TAPAN_A_CDC_COMP2_B5_CTL,
+	TAPAN_A_CDC_COMP0_B6_CTL,
+	TAPAN_A_CDC_COMP1_B6_CTL,
+	TAPAN_A_CDC_COMP2_B6_CTL,
+	TAPAN_A_CDC_COMP0_SHUT_DOWN_STATUS,
+	TAPAN_A_CDC_COMP1_SHUT_DOWN_STATUS,
+	TAPAN_A_CDC_COMP2_SHUT_DOWN_STATUS,
+	TAPAN_A_CDC_COMP0_FS_CFG,
+	TAPAN_A_CDC_COMP1_FS_CFG,
+	TAPAN_A_CDC_COMP2_FS_CFG,
+	TAPAN_A_CDC_CONN_RX1_B1_CTL,
+	TAPAN_A_CDC_CONN_RX1_B2_CTL,
+	TAPAN_A_CDC_CONN_RX1_B3_CTL,
+	TAPAN_A_CDC_CONN_RX2_B1_CTL,
+	TAPAN_A_CDC_CONN_RX2_B2_CTL,
+	TAPAN_A_CDC_CONN_RX2_B3_CTL,
+	TAPAN_A_CDC_CONN_RX3_B1_CTL,
+	TAPAN_A_CDC_CONN_RX3_B2_CTL,
+	TAPAN_A_CDC_CONN_RX4_B1_CTL,
+	TAPAN_A_CDC_CONN_RX4_B2_CTL,
+	TAPAN_A_CDC_CONN_RX4_B3_CTL,
+	TAPAN_A_CDC_CONN_ANC_B1_CTL,
+	TAPAN_A_CDC_CONN_ANC_B2_CTL,
+	TAPAN_A_CDC_CONN_TX_B1_CTL,
+	TAPAN_A_CDC_CONN_TX_B2_CTL,
+	TAPAN_A_CDC_CONN_TX_B3_CTL,
+	TAPAN_A_CDC_CONN_TX_B4_CTL,
+	TAPAN_A_CDC_CONN_EQ1_B1_CTL,
+	TAPAN_A_CDC_CONN_EQ1_B2_CTL,
+	TAPAN_A_CDC_CONN_EQ1_B3_CTL,
+	TAPAN_A_CDC_CONN_EQ1_B4_CTL,
+	TAPAN_A_CDC_CONN_EQ2_B1_CTL,
+	TAPAN_A_CDC_CONN_EQ2_B2_CTL,
+	TAPAN_A_CDC_CONN_EQ2_B3_CTL,
+	TAPAN_A_CDC_CONN_EQ2_B4_CTL,
+	TAPAN_A_CDC_CONN_SRC1_B1_CTL,
+	TAPAN_A_CDC_CONN_SRC1_B2_CTL,
+	TAPAN_A_CDC_CONN_SRC2_B1_CTL,
+	TAPAN_A_CDC_CONN_SRC2_B2_CTL,
+	TAPAN_A_CDC_CONN_TX_SB_B1_CTL,
+	TAPAN_A_CDC_CONN_TX_SB_B2_CTL,
+	TAPAN_A_CDC_CONN_TX_SB_B3_CTL,
+	TAPAN_A_CDC_CONN_TX_SB_B4_CTL,
+	TAPAN_A_CDC_CONN_TX_SB_B5_CTL,
+	TAPAN_A_CDC_CONN_TX_SB_B11_CTL,
+	TAPAN_A_CDC_CONN_RX_SB_B1_CTL,
+	TAPAN_A_CDC_CONN_RX_SB_B2_CTL,
+	TAPAN_A_CDC_CONN_CLSH_CTL,
+	TAPAN_A_CDC_CONN_MISC,
+	TAPAN_A_CDC_MBHC_EN_CTL,
+	TAPAN_A_CDC_MBHC_FIR_B1_CFG,
+	TAPAN_A_CDC_MBHC_FIR_B2_CFG,
+	TAPAN_A_CDC_MBHC_TIMER_B1_CTL,
+	TAPAN_A_CDC_MBHC_TIMER_B2_CTL,
+	TAPAN_A_CDC_MBHC_TIMER_B3_CTL,
+	TAPAN_A_CDC_MBHC_TIMER_B4_CTL,
+	TAPAN_A_CDC_MBHC_TIMER_B5_CTL,
+	TAPAN_A_CDC_MBHC_TIMER_B6_CTL,
+	TAPAN_A_CDC_MBHC_B1_STATUS,
+	TAPAN_A_CDC_MBHC_B2_STATUS,
+	TAPAN_A_CDC_MBHC_B3_STATUS,
+	TAPAN_A_CDC_MBHC_B4_STATUS,
+	TAPAN_A_CDC_MBHC_B5_STATUS,
+	TAPAN_A_CDC_MBHC_B1_CTL,
+	TAPAN_A_CDC_MBHC_B2_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B1_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B2_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B3_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B4_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B5_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B6_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B7_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B8_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B9_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B10_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B11_CTL,
+	TAPAN_A_CDC_MBHC_VOLT_B12_CTL,
+	TAPAN_A_CDC_MBHC_CLK_CTL,
+	TAPAN_A_CDC_MBHC_INT_CTL,
+	TAPAN_A_CDC_MBHC_DEBUG_CTL,
+	TAPAN_A_CDC_MBHC_SPARE,
+};
+
+void Dump_wcd9306_reg(void) {
+	u32 val, i;
+	struct wcd9xxx *wcd9xxx = g_tapan->codec->control_data;
+	for (i=0; i<(sizeof(tabla_reg_dump)/(sizeof(int))); i++) {
+		val = wcd9xxx_reg_read(&wcd9xxx->core_res, tabla_reg_dump[i]);
+		printk("[Audio][wcd9306] read register reg[%x]=[%x]\n", tabla_reg_dump[i], val);
+	}
+}
+EXPORT_SYMBOL(Dump_wcd9306_reg);
+
+//mei_huang@asus.com for maxxaudio +++
+u32 bMaxxOn = 0;
+extern int g_flag_csvoice_fe_connected;
+extern int gSKYPE_state;
+extern int gRingtone_state;
+
+void apply_wcd9306_spk_gain_maxxaudio_on(void)
+{
+	u32 rx4_vol;
+	struct wcd9xxx *wcd9xxx = g_tapan->codec->control_data;
+
+	rx4_vol = wcd9xxx_reg_read(&wcd9xxx->core_res, TAPAN_A_CDC_RX4_VOL_CTL_B2_CTL);
+	printk("apply_wcd9306_spk_gain_maxxaudio_on rx4_vol:0x%x\n", rx4_vol);
+	
+	if (g_tapan->spkr_pa_widget_on) {
+		wcd9xxx_reg_write(&wcd9xxx->core_res, TAPAN_A_CDC_RX4_VOL_CTL_B2_CTL, 0x00);     //not modify gain
+	}
+}
+
+void apply_wcd9306_spk_gain_maxxaudio_off(void)
+{
+	u32 rx4_vol;
+	struct wcd9xxx *wcd9xxx = g_tapan->codec->control_data;
+
+	rx4_vol = wcd9xxx_reg_read(&wcd9xxx->core_res, TAPAN_A_CDC_RX4_VOL_CTL_B2_CTL);
+	printk("apply_wcd9306_spk_gain_maxxaudio_off befor rx4_vol:0x%x\n", rx4_vol);
+	
+	if (g_tapan->spkr_pa_widget_on) {
+		if ((g_flag_csvoice_fe_connected) || (gSKYPE_state) || (gRingtone_state)) {
+			pr_debug("spkr_pa_widget_on Special state\n");
+			wcd9xxx_reg_write(&wcd9xxx->core_res, TAPAN_A_CDC_RX4_VOL_CTL_B2_CTL, 0x00);//not modify gain
+		} else {
+			wcd9xxx_reg_write(&wcd9xxx->core_res, TAPAN_A_CDC_RX4_VOL_CTL_B2_CTL, 0xfd);     //modify gain -3db
+		}
+	}
+	
+	printk("apply_wcd9306_spk_gain_maxxaudio_off after rx4_vol:0x%x\n", rx4_vol);
+}
+
+void apply_wcd9306_spk_gain(void)
+{
+	printk("apply_wcd9306_spk_gain\n");
+	if (g_tapan->spkr_pa_widget_on) {
+		if (bMaxxOn) {
+			apply_wcd9306_spk_gain_maxxaudio_on();
+		} else {
+			apply_wcd9306_spk_gain_maxxaudio_off();
+		}
+	}
+}
+
+static void amp_delay_work(struct work_struct *work)
+{
+        apply_wcd9306_spk_gain_maxxaudio_on();
+}
+
+static void amp_work(struct work_struct *work)
+{
+        apply_wcd9306_spk_gain_maxxaudio_off();
+}
+//mei_huang@asus.com ---
+
+static ssize_t audio_debug_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off) {
+	char messages[256];
+	memset(messages, 0, sizeof(messages));
+
+	printk("[Audio Debug] audio_debug_proc_write\n");
+	if (len > 256) {
+		len = 256;
+    }
+	if (copy_from_user(messages, buff, len)) {
+		return -EFAULT;
+	}
+
+	initKernelEnv();
+
+    if(strncmp(messages, "1", 1) == 0) {
+				gpio_direction_output(wcd9306_hs_data.hs_path_en, 0);
+				switch_set_state(&g_tapan->headset_jack->sdev, 0);
+				g_user_dbg_mode = 1;
+				printk("Audio Debug Mode!!!\n");
+	} else if(strncmp(messages, "0", 1) == 0) {
+			printk("Audio Headset Normal Mode!!!\n");
+				gpio_direction_output(wcd9306_hs_data.hs_path_en, 1);
+                if(gpio_get_value(wcd9306_hs_data.jack_gpio))
+                    mod_timer(&hs_timer,jiffies + msecs_to_jiffies(100));
+                else
+	                mod_timer(&hs_timer,jiffies + msecs_to_jiffies(1000));
+			//switch audio output between headset and speaker--
+			g_user_dbg_mode = 0;
+	}
+
+	//read register
+	if(strncmp(messages, "read", strlen("read")) == 0) {
+		u32 val, reg_val;
+		struct wcd9xxx *wcd9xxx = g_tapan->codec->control_data;
+		sscanf(messages + 5, "%x", &reg_val);
+		val = wcd9xxx_reg_read(&wcd9xxx->core_res, reg_val);
+		printk("[Audio][wcd9306] read register reg[%x]=[%x]\n", reg_val, val);
+	}
+	//write register
+    else if(strncmp(messages, "write", strlen("write")) == 0) {
+		u32 val, reg_val;
+		struct wcd9xxx *wcd9xxx = g_tapan->codec->control_data;
+		sscanf(messages + 6, "%x %x", &reg_val, &val);
+		wcd9xxx_reg_write(&wcd9xxx->core_res, reg_val, val);
+
+		val = wcd9xxx_reg_read(&wcd9xxx->core_res, reg_val);
+		printk("[Audio][wcd9306] write register reg[%x]=[%x]\n", reg_val, val);
+	}
+	//dump register
+	else if(strncmp(messages, "dumpreg", strlen("dumpreg")) == 0) {
+		Dump_wcd9306_reg();
+	}
+	//maxxaudio  mei_huang@asus.com
+	else if(strncmp(messages, "maxxaudio", strlen("maxxaudio")) == 0) {
+		sscanf(messages + 10, "%x", &bMaxxOn);
+		printk("[Audio][MaxAudio] bMaxxOn = %d\n", bMaxxOn);
+		// change to 500ms for just a little delay for better sound effect
+		// at the beginning when switch from power saving to the other modes
+		if (bMaxxOn) {
+			schedule_delayed_work(&g_amp_dwork, msecs_to_jiffies(500));
+		} else {
+			schedule_work(&g_amp_work);
+		}
+	}
+
+	deinitKernelEnv();
+	return len;
+}
+
+static struct file_operations audio_debug_proc_ops = {
+
+	.write = audio_debug_proc_write,
+};
+
+static void create_audio_debug_proc_file(void) {
+	printk("[Audio] create_audio_debug_proc_file\n");
+	audio_debug_proc_file = create_proc_entry(Audio_debug_PROC_FILE, 0666, NULL);
+	if (audio_debug_proc_file) {
+		audio_debug_proc_file->proc_fops = &audio_debug_proc_ops;
+	}
+	
+	//mei_huang@asus.com for maxxaudio
+	INIT_DELAYED_WORK(&g_amp_dwork, amp_delay_work);
+	INIT_WORK(&g_amp_work, amp_work);
+}
+
+static void remove_audio_debug_proc_file(void) {
+	extern struct proc_dir_entry proc_root;
+	printk("[Audio] remove_audio_debug_proc_file\n");
+	remove_proc_entry(Audio_debug_PROC_FILE, &proc_root);
+}
+// wendy4_wang@asus.com
+
 static struct regulator *tapan_codec_find_regulator(
 	struct snd_soc_codec *codec,
 	const char *name)
@@ -5802,6 +6691,23 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 	int i, rco_clk_rate;
 	void *ptr = NULL;
 	struct wcd9xxx_core_resource *core_res;
+
+    // wendy4_wang@asus.com
+    struct gpio_switch_data *switch_data = NULL;
+
+
+	switch_data = kzalloc(sizeof(struct gpio_switch_data), GFP_KERNEL);
+	if (!switch_data)
+		return -ENOMEM;
+
+	switch_data->sdev.name = "h2w";
+	switch_data->sdev.state = 0;
+	switch_data->gpio = wcd9306_hs_data.jack_gpio;
+
+	ret = switch_dev_register(&switch_data->sdev);
+	if (ret < 0)
+		printk("fail to register switch\n");
+	// wendy4_wang@asus.com
 
 	codec->control_data = dev_get_drvdata(codec->dev->parent);
 	control = codec->control_data;
@@ -5940,6 +6846,39 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 
 	(void) tapan_setup_irqs(tapan);
 
+    //wendy4_wang@asus.com
+
+    tapan->headset_jack = switch_data;
+
+    setup_timer(&hs_timer, hs_timer_fun, (unsigned long)tapan);
+	setup_timer(&button_timer, button_timer_fun, (unsigned long)tapan);
+
+	ret = request_irq(gpio_to_irq(wcd9306_hs_data.jack_gpio), tabla_hs_detect_irq,
+	IRQF_TRIGGER_RISING|IRQF_TRIGGER_FALLING, "JACK_IN Status IRQ", tapan);
+	if (ret) {
+	    printk("%s: Failed to request irq JACK_IN\n", __func__);
+	} else
+	    printk("%s: sucess to request irq JACK_IN irq = %d  \n", __func__,gpio_to_irq(wcd9306_hs_data.jack_gpio));
+
+	ret = request_irq(gpio_to_irq(wcd9306_hs_data.button_gpio), tabla_button_detect_irq, IRQF_TRIGGER_RISING|IRQF_TRIGGER_FALLING, "HS_HOOK Status IRQ", tapan);
+	if (ret) {
+	    printk("%s: Failed to request irq HS_HOOK\n", __func__);
+	} else
+	    pr_err("%s: sucees to request irq  HS_HOOK,irq=%d\n", __func__,gpio_to_irq(wcd9306_hs_data.button_gpio));
+
+	disable_irq(gpio_to_irq(wcd9306_hs_data.button_gpio));
+
+    if (wcd9306_hs_data.hsmic_bias < 0) { // better_ding@asus.com avoid mic_bias closed by stream
+			tapan->mbhc.micbias_enable = true;
+		}
+
+	INIT_WORK(&button_press_work, report_press_event);
+	INIT_WORK(&button_release_work, report_release_event);
+	INIT_WORK(&report_hs_event_work, report_hs_event);
+
+	g_tapan = tapan;
+	//wendy4_wang@asus.com
+
 	atomic_set(&kp_tapan_priv, (unsigned long)tapan);
 	mutex_lock(&dapm->codec->mutex);
 	if (codec_ver == WCD9306) {
@@ -5956,6 +6895,44 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 
 	if (ret)
 		tapan_cleanup_irqs(tapan);
+
+    //wendy4_wang@asus.com
+		if (g_user_dbg_mode) {
+			printk("[Audio Debug] Set Y from aboot!!!\n");
+			gpio_direction_output(wcd9306_hs_data.hs_path_en, 0);
+			switch_set_state(&tapan->headset_jack->sdev, 0);
+		}
+		else
+		{
+			printk("[Audio Debug] Set N from aboot!!!\n");
+			gpio_direction_output(wcd9306_hs_data.hs_path_en, 1);
+			if (gpio_get_value(wcd9306_hs_data.jack_gpio)) {
+				printk("in codec probe,switch_set_state 0\n");
+				switch_set_state(&tapan->headset_jack->sdev, 0);
+				if (wcd9306_hs_data.hsmic_bias >= 0) {
+					gpio_direction_output(wcd9306_hs_data.hsmic_bias, 0);
+				}else { //non gpio
+			         wcd9xxx_enable_micbias(&(g_tapan->mbhc), 0);
+		        }
+			} else {
+				printk("in codec probe,switch_set_state 1\n");
+				switch_set_state(&tapan->headset_jack->sdev, 1);
+				if (wcd9306_hs_data.hsmic_bias >= 0) {
+					gpio_direction_output(wcd9306_hs_data.hsmic_bias, 1);
+				} else { //non gpio
+			        wcd9xxx_enable_micbias(&(g_tapan->mbhc), 1);
+		        }
+			}
+		}
+
+		if(!gpio_get_value(wcd9306_hs_data.jack_gpio)){
+			printk("in codec probe,begain report_hs_event_work\n");
+			schedule_work(&report_hs_event_work);
+		}
+
+	create_audio_debug_proc_file();
+	codec_status=1;//wendy4_wang@asus.com;for report codec status;
+	//wendy4_wang@asus.com
 
 	return ret;
 
@@ -5989,6 +6966,11 @@ static int tapan_codec_remove(struct snd_soc_codec *codec)
 	for (index = 0; index < CP_REG_MAX; index++)
 		tapan->cp_regulators[index] = NULL;
 
+    // wendy4_wang@asus.com
+	remove_audio_debug_proc_file();
+	// wendy4_wang@asus.com
+
+
 	kfree(tapan);
 	return 0;
 }
@@ -6018,7 +7000,24 @@ static struct snd_soc_codec_driver soc_codec_dev_tapan = {
 #ifdef CONFIG_PM
 static int tapan_suspend(struct device *dev)
 {
-	dev_dbg(dev, "%s: system suspend\n", __func__);
+	dev_err(dev, "%s: system suspend\n", __func__);
+//wendy4_Wang@asus.com
+	if (g_user_dbg_mode == 0) {
+		if (!gpio_get_value(wcd9306_hs_data.jack_gpio)) {
+			while (hook_irq_balance) {
+				printk("%s: Enable IRQ HS_HOOK_DET\n", __func__);
+				enable_irq(gpio_to_irq(wcd9306_hs_data.button_gpio));
+				hook_irq_balance -= 1;
+			}
+			if (!hook_irq_wake) {
+				enable_irq_wake(gpio_to_irq(wcd9306_hs_data.button_gpio));
+				hook_irq_wake = 1;
+			}
+		}
+		enable_irq_wake(gpio_to_irq(wcd9306_hs_data.jack_gpio));
+		device_wake = 0;
+	}
+//wendy4_Wang@asus.com	
 	return 0;
 }
 
@@ -6029,6 +7028,16 @@ static int tapan_resume(struct device *dev)
 	dev_dbg(dev, "%s: system resume\n", __func__);
 	/* Notify */
 	wcd9xxx_resmgr_notifier_call(&tapan->resmgr, WCD9XXX_EVENT_POST_RESUME);
+
+	if (!device_wake){
+		disable_irq_wake(gpio_to_irq(wcd9306_hs_data.jack_gpio));
+		if (hook_irq_wake) {
+			disable_irq_wake(gpio_to_irq(wcd9306_hs_data.button_gpio));
+			hook_irq_wake = 0;
+		}
+		device_wake = 1;
+	}
+
 	return 0;
 }
 

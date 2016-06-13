@@ -30,6 +30,14 @@
 #include <linux/i2c.h>
 #include <sound/soc.h>
 
+// wendy4_wang@asus.com
+#include <linux/proc_fs.h>
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/file.h>
+// wendy4_wang@asus.com
+
+
 #define WCD9XXX_REGISTER_START_OFFSET 0x800
 #define WCD9XXX_SLIM_RW_MAX_TRIES 3
 #define SLIMBUS_PRESENT_TIMEOUT 100
@@ -488,6 +496,31 @@ exit:
 	return d;
 }
 
+// wendy4_wang@asus.com
+#define AUDIO_CODEC_PROC_FILE  "driver/audio_codec"
+static struct proc_dir_entry *audio_codec_proc_file;
+int codec_status=0;
+EXPORT_SYMBOL(codec_status);
+
+static ssize_t audio_codec_proc_read(char *page, char **start, off_t off, int count,
+                  int *eof, void *data)
+{
+	return sprintf(page, "%d\n",codec_status);
+}
+
+static void create_audio_codec_proc_file(void)
+{
+	pr_err("[Audio] create_audio_codec_proc_file\n");
+	audio_codec_proc_file = create_proc_entry(AUDIO_CODEC_PROC_FILE, 0644, NULL);
+	if (audio_codec_proc_file) {
+		audio_codec_proc_file->read_proc = audio_codec_proc_read;
+		pr_err("[Audio] create_audio_codec_proc_file sucess!\n");
+	} else {
+		pr_err("[Audio] create_audio_codec_proc_file failed!\n");
+	}
+}
+// wendy4_wang@asus.com
+
 static int wcd9xxx_num_irq_regs(const struct wcd9xxx *wcd9xxx)
 {
 	return (wcd9xxx->codec_type->num_irqs / 8) +
@@ -622,6 +655,10 @@ static int wcd9xxx_device_init(struct wcd9xxx *wcd9xxx)
 		dev_err(wcd9xxx->dev, "Device wakeup init failed: %d\n", ret);
 		goto err_irq;
 	}
+
+// wendy4_wang@asus.com
+	create_audio_codec_proc_file();
+// wendy4_wang@asus.com
 
 	return ret;
 err_irq:
@@ -1633,6 +1670,11 @@ static int wcd9xxx_slim_probe(struct slim_device *slim)
 	}
 #endif
 
+// wendy4_wang@asus.com
+	if(codec_status){
+		codec_status=1;
+	}
+// wendy4_wang@asus.com
 	return ret;
 
 err_slim_add:
@@ -1644,6 +1686,9 @@ err_supplies:
 err_codec:
 	kfree(wcd9xxx);
 err:
+// wendy4_wang@asus.com
+	codec_status=0;
+// wendy4_wang@asus.com
 	return ret;
 }
 static int wcd9xxx_slim_remove(struct slim_device *pdev)

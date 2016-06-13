@@ -64,4 +64,7 @@ static inline int wake_lock_active(struct wake_lock *lock)
 	return lock->ws.active;
 }
 
+//[CR]
+void print_active_locks(void);
+
 #endif

@@ -395,6 +395,25 @@ struct mmc_host {
 	} embedded_sdio_data;
 #endif
 
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPENDTEST
+	bool suspendtest;
+	unsigned int suspendcnt;
+	unsigned int suspend_datasz;
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
+
+//ASUS_BSP +++ lei_guo "mmc bkops stress test"
+#ifdef CONFIG_MMC_BKOPS_TEST
+	bool bkopstest;
+	unsigned long bkops_start_time;
+	unsigned long bkops_cost_time;
+	unsigned int bkops_startcnt;
+	unsigned int bkops_stopcnt;
+	unsigned int bkops_datasz;
+#endif
+//ASUS_BSP --- lei_guo "mmc bkops stress test"
+
 #ifdef CONFIG_MMC_PERF_PROFILING
 	struct {
 
@@ -406,6 +425,7 @@ struct mmc_host {
 	} perf;
 	bool perf_enable;
 #endif
+	unsigned int sd_status; //ASUS_BSP +++ Allen_Zhuang "sd status for ATD"
 	struct mmc_ios saved_ios;
 	struct {
 		unsigned long	busy_time_us;

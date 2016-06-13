@@ -22,6 +22,8 @@
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
 #include "mdss_panel.h"
+#include <linux/of_gpio.h>
+#include <linux/gpio.h>
 
 /* wait for at least 2 vsyncs for lowest refresh rate (24hz) */
 #define VSYNC_TIMEOUT_US 100000
@@ -310,6 +312,10 @@ static int mdss_mdp_video_stop(struct mdss_mdp_ctl *ctl)
 	}
 
 	if (ctx->timegen_en) {
+
+		#ifdef ASUS_A500KL_PROJECT
+		gpio_set_value(15, 0);
+		#endif
 		rc = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK, NULL);
 		if (rc == -EBUSY) {
 			pr_debug("intf #%d busy don't turn off\n",
@@ -646,7 +652,6 @@ error:
 	free_bootmem_late(mdp5_data->splash_mem_addr,
 				 mdp5_data->splash_mem_size);
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 	return ret;
 }
 

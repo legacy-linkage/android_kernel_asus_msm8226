@@ -20,12 +20,18 @@
 #include <mach/rpm-regulator-smd.h>
 #include <linux/regulator/consumer.h>
 
+#ifndef CONFIG_MSMB_CAMERA_DEBUG
+#define CONFIG_MSMB_CAMERA_DEBUG
+#endif
+
 #undef CDBG
 #ifdef CONFIG_MSMB_CAMERA_DEBUG
-#define CDBG(fmt, args...) pr_err(fmt, ##args)
+#define CDBG(fmt, args...) do { } while (0)
 #else
 #define CDBG(fmt, args...) do { } while (0)
 #endif
+
+int a500kl_camera_debug = 0;
 
 static int32_t msm_sensor_enable_i2c_mux(struct msm_camera_i2c_conf *i2c_conf)
 {
@@ -570,6 +576,103 @@ int32_t msm_sensor_init_gpio_pin_tbl(struct device_node *of_node,
 			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_STANDBY]);
 	}
 
+       // gpio-cam_reset
+	if (of_property_read_bool(of_node, "qcom,gpio-cam_reset") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-cam_reset", &val);
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-cam_reset failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-cam_reset invalid %d\n",
+				__func__, __LINE__, val);
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_RESET] =
+			gpio_array[val];
+		CDBG("%s qcom,gpio-cam_reset %d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_RESET]);
+		gpio_request(gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_RESET] ,"SENSOR_GPIO_CAM_RESET");
+
+	}
+
+       // gpio-cam_pwdn
+	if (of_property_read_bool(of_node, "qcom,gpio-cam_pwdn") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-cam_pwdn", &val);
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-cam_pwdn failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-cam_pwdn invalid %d\n",
+				__func__, __LINE__, val);
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_PWDN] =
+			gpio_array[val];
+		CDBG("%s qcom,gpio-gpio-cam_pwdn %d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_PWDN]);
+		gpio_request(gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_PWDN] ,"SENSOR_GPIO_CAM_PWDN");
+
+	}
+
+       //gpio-cam_1p8_en
+	if (of_property_read_bool(of_node, "qcom,gpio-cam_1p8_en") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-cam_1p8_en", &val);
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-cam_1p8_en failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-cam_1p8_en invalid %d\n",
+				__func__, __LINE__, val);
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_1P8] =
+			gpio_array[val];
+		CDBG("%s qcom,gpio-cam_1p8_en%d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_1P8]);
+		gpio_request(gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_1P8] ,"SENSOR_GPIO_CAM_1P8");
+	}
+
+       //gpio-cam_2p8_en
+	if (of_property_read_bool(of_node, "qcom,gpio-cam_2p8_en") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-cam_2p8_en", &val);
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-cam_2p8_en failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-cam_2p8_en invalid %d\n",
+				__func__, __LINE__, val);
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_2P8] =
+			gpio_array[val];
+		CDBG("%s qcom,gpio-cam_2p8_en %d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_2P8]);
+		gpio_request(gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_2P8] ,"SENSOR_GPIO_CAM_2P8");
+	}
+
+	//gpio-cam_camid
+	if (of_property_read_bool(of_node, "qcom,gpio-cam_camid") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-cam_camid", &val);
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-cam_camid failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-cam_camid invalid %d\n",
+				__func__, __LINE__, val);
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_CAMID] =
+			gpio_array[val];
+		pr_err("%s qcom,gpio-cam_camid %d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_CAMID]);
+		gpio_request(gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_CAMID] ,"SENSOR_GPIO_CAM_ID");
+	}
+
 	rc = of_property_read_u32(of_node, "qcom,gpio-vio", &val);
 	if (!rc) {
 		if (val >= gpio_array_size) {
@@ -970,7 +1073,7 @@ int32_t msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 	uint32_t retry = 0;
 	s_ctrl->stop_setting_valid = 0;
 
-	CDBG("%s:%d\n", __func__, __LINE__);
+	pr_err("%s:%d\n", __func__, __LINE__);
 	power_setting_array = &s_ctrl->power_setting_array;
 
 	if (data->gpio_conf->cam_gpiomux_conf_tbl != NULL) {
@@ -1060,6 +1163,8 @@ int32_t msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 		}
 	}
 
+	//msleep(50);	//A500KL add delay for camera power up
+
 	if (s_ctrl->sensor_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
 		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_util(
 			s_ctrl->sensor_i2c_client, MSM_CCI_INIT);
@@ -1087,7 +1192,7 @@ int32_t msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 		}
 	}
 
-	CDBG("%s exit\n", __func__);
+	pr_err("%s exit\n", __func__);
 	return 0;
 power_up_failed:
 	pr_err("%s:%d failed\n", __func__, __LINE__);
@@ -1149,7 +1254,7 @@ int32_t msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 	struct msm_camera_sensor_board_info *data = s_ctrl->sensordata;
 	s_ctrl->stop_setting_valid = 0;
 
-	CDBG("%s:%d\n", __func__, __LINE__);
+	pr_err("%s:%d\n", __func__, __LINE__);
 	power_setting_array = &s_ctrl->power_setting_array;
 
 	if (s_ctrl->sensor_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
@@ -1212,7 +1317,7 @@ int32_t msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 	msm_camera_request_gpio_table(
 		data->gpio_conf->cam_gpio_req_tbl,
 		data->gpio_conf->cam_gpio_req_tbl_size, 0);
-	CDBG("%s exit\n", __func__);
+	pr_err("%s exit\n", __func__);
 	return 0;
 }
 
@@ -1230,12 +1335,13 @@ int32_t msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 		return rc;
 	}
 
-	CDBG("%s: read id: %x expected id %x:\n", __func__, chipid,
+	pr_err("%s: read id: %x expected id %x:\n", __func__, chipid,
 		s_ctrl->sensordata->slave_info->sensor_id);
 	if (chipid != s_ctrl->sensordata->slave_info->sensor_id) {
 		pr_err("msm_sensor_match_id chip id doesnot match\n");
 		return -ENODEV;
 	}
+	pr_err("msm_sensor_match_id rc=%d\n",rc);
 	return rc;
 }
 
@@ -1405,14 +1511,13 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 	case CFG_WRITE_I2C_ARRAY: {
 		struct msm_camera_i2c_reg_setting conf_array;
 		struct msm_camera_i2c_reg_array *reg_setting = NULL;
-
+		int i = 0;
 		if (s_ctrl->sensor_state != MSM_SENSOR_POWER_UP) {
 			pr_err("%s:%d failed: invalid state %d\n", __func__,
 				__LINE__, s_ctrl->sensor_state);
 			rc = -EFAULT;
 			break;
 		}
-
 		if (copy_from_user(&conf_array,
 			(void *)cdata->cfg.setting,
 			sizeof(struct msm_camera_i2c_reg_setting))) {
@@ -1420,13 +1525,11 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 			rc = -EFAULT;
 			break;
 		}
-
 		if (!conf_array.size) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
 		}
-
 		reg_setting = kzalloc(conf_array.size *
 			(sizeof(struct msm_camera_i2c_reg_array)), GFP_KERNEL);
 		if (!reg_setting) {
@@ -1444,8 +1547,33 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 		}
 
 		conf_array.reg_setting = reg_setting;
-		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write_table(
-			s_ctrl->sensor_i2c_client, &conf_array);
+
+		if(conf_array.size == 0 || (reg_setting->reg_addr == 0 && reg_setting->reg_data == 1620)
+								|| (reg_setting->reg_addr == 0 && reg_setting->reg_data == 810)
+								|| (reg_setting->reg_addr == 0 && reg_setting->reg_data == 1392))
+		{
+			CDBG("Camera error reg_setting->reg_addr:=0x%x,0x%x\n",reg_setting->reg_addr,reg_setting->reg_data);
+			rc =0;
+		}
+		else
+		{
+			if (reg_setting->reg_addr == 0x15)
+			{
+				for (i=0;i<conf_array.size;i++)
+				{
+					if (a500kl_camera_debug == 1)
+					{
+						pr_err("a500kl Camera error reg_setting->reg_addr:=0x%x,0x%x\n",reg_setting[i].reg_addr,reg_setting[i].reg_data);
+					}
+					s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(s_ctrl->sensor_i2c_client,reg_setting[i].reg_addr,reg_setting[i].reg_data,MSM_CAMERA_I2C_BYTE_ADDR);
+				}
+			} else {
+				//pr_err("Camera error reg_setting->reg_addr:=0x%x,0x%x\n",reg_setting->reg_addr,reg_setting->reg_data);
+				rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write_table(
+					s_ctrl->sensor_i2c_client, &conf_array);
+			}
+		}
+
 		kfree(reg_setting);
 		break;
 	}
@@ -1504,7 +1632,6 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 		struct msm_camera_i2c_reg_array *reg_setting = NULL;
 		uint16_t write_slave_addr = 0;
 		uint16_t orig_slave_addr = 0;
-
 		if (copy_from_user(&write_config,
 			(void *)cdata->cfg.setting,
 			sizeof(struct msm_camera_i2c_array_write_config))) {
@@ -1579,7 +1706,6 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 	case CFG_WRITE_I2C_SEQ_ARRAY: {
 		struct msm_camera_i2c_seq_reg_setting conf_array;
 		struct msm_camera_i2c_seq_reg_array *reg_setting = NULL;
-
 		if (s_ctrl->sensor_state != MSM_SENSOR_POWER_UP) {
 			pr_err("%s:%d failed: invalid state %d\n", __func__,
 				__LINE__, s_ctrl->sensor_state);

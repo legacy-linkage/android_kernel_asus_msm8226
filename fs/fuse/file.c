@@ -664,7 +664,8 @@ static int fuse_readpages_fill(void *_data, struct page *page)
 		}
 	}
 
-#ifdef CONFIG_CMA
+//ASUS Fuse +++ "not use CONFIG_CMA in fuse to avoid oom-killer triggered" Jeffery_Hu@asus.com
+#if 0
 	if (is_cma_pageblock(page)) {
 		struct page *oldpage = page, *newpage;
 		int err;
@@ -700,6 +701,7 @@ static int fuse_readpages_fill(void *_data, struct page *page)
 		page = newpage;
 	}
 #endif
+//ASUS Fuse --- "not use CONFIG_CMA in fuse to avoid oom-killer triggered"
 
 	page_cache_get(page);
 	req->pages[req->num_pages] = page;

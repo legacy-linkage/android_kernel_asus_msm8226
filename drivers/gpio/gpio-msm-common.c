@@ -33,6 +33,8 @@
 #include <mach/mpm.h>
 #include "gpio-msm-common.h"
 
+int gpio_irq_cnt, gpio_resume_irq[8];
+
 #ifdef CONFIG_GPIO_MSM_V3
 enum msm_tlmm_register {
 	SDC4_HDRV_PULL_CTL = 0x0, /* NOT USED */
@@ -435,6 +437,7 @@ void msm_gpio_show_resume_irq(void)
 	unsigned long irq_flags;
 	int i, irq, intstat;
 	int ngpio = msm_gpio.gpio_chip.ngpio;
+	gpio_irq_cnt=0;
 
 	if (!msm_show_resume_irq_mask)
 		return;
@@ -444,8 +447,11 @@ void msm_gpio_show_resume_irq(void)
 		intstat = __msm_gpio_get_intr_status(i);
 		if (intstat) {
 			irq = msm_gpio_to_irq(&msm_gpio.gpio_chip, i);
-			pr_warning("%s: %d triggered\n",
-				__func__, irq);
+			pr_warning("[PM] GPIO triggered: %d\n", i);
+			if(gpio_irq_cnt < 8) {
+				gpio_resume_irq[gpio_irq_cnt]=i;
+				gpio_irq_cnt++;
+			}
 		}
 	}
 	spin_unlock_irqrestore(&tlmm_lock, irq_flags);

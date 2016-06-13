@@ -54,6 +54,7 @@ static irqreturn_t mmc_cd_gpio_irqt(int irq, void *dev_id)
 				"HIGH" : "LOW");
 		cd->status = status;
 
+		host->sd_status = status; //ASUS_BSP +++ Allen_Zhuang "sd status for ATD"
 		/* Schedule a card detection after a debounce timeout */
 		mmc_detect_change(host, msecs_to_jiffies(100));
 	}

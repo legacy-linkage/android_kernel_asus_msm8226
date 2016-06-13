@@ -20,6 +20,14 @@
 #include <linux/mmc/host.h>
 #include "queue.h"
 
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPENDTEST
+#include "../core/mmc_ops.h"
+#include "../core/core.h"
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
+#include <linux/delay.h>//fix build error for eMMC suspend
+
 #define MMC_QUEUE_BOUNCESZ	65536
 
 
@@ -52,6 +60,42 @@ static int mmc_prep_request(struct request_queue *q, struct request *req)
 
 	return BLKPREP_OK;
 }
+
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPENDTEST
+static int mmc_run_set_suspendtest(struct mmc_queue *mq)
+{
+	int err;
+
+	if (mq->card->host->suspend_datasz) {
+		 if (mq->card->sectors_changed < mq->card->host->suspend_datasz*2)	// 1 sector = 512 byte
+			return 0;
+	} else {
+		mq->card->host->suspend_datasz = 100*1024;	//default value: 100MB
+		return 0;
+	}
+
+	mq->card->sectors_changed = 0;
+	mq->card->host->suspendcnt++;
+
+	err = mmc_suspend_host(mq->card->host);
+	if (err < 0)
+		pr_err("%s: %s: suspend host failed: %d\n", mmc_hostname(mq->card->host),
+		       __func__, err);
+
+	msleep(1000);
+
+	err = mmc_resume_host(mq->card->host);
+	if (err < 0)
+		pr_err("%s: %s: resume host failed: %d\n", mmc_hostname(mq->card->host),
+		       __func__, err);
+
+	msleep(1000);
+
+	return 0;
+}
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
 
 static int mmc_queue_thread(void *d)
 {
@@ -104,8 +148,47 @@ static int mmc_queue_thread(void *d)
 				set_current_state(TASK_RUNNING);
 				break;
 			}
+			
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPENDTEST
+			if (mq->card->host->suspendtest)
+				mmc_run_set_suspendtest(mq);
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
+//ASUS_BSP +++ lei_guo "mmc bkops stress test"
+#ifdef CONFIG_MMC_BKOPS_TEST
+			if (mq->card->host->bkopstest)
+			{
+				if(mq->card->host->bkops_datasz)
+				{
+					if(mq->card->bkops_info.sectors_changed > (mq->card->host->bkops_datasz * 2))
+					{
+						//printk("bkops  queue.c mq->card->bkops_info.sectors_changed = %d \n", mq->card->bkops_info.sectors_changed);
+						//if (mmc_card_need_bkops(card))
+						{
+							//printk("bkops  queue.c mmc_start_bkops \n");
+							mmc_start_bkops(card, false);
+							mq->card->host->context_info.is_urgent = false;
+						}
+					}
+				}
+				else
+				{
+					mq->card->host->bkops_datasz = 1024 * 100;//100MB
+				}
+			}
+			else
+			{
+				//printk("bkops  queue.c mmc_start_delayed_bkops \n");
+				mmc_start_delayed_bkops(card);
+				mq->card->host->context_info.is_urgent = false;
+			}
+#else
+			//printk("bkops  queue.c mmc_start_delayed_bkops \n");
 			mmc_start_delayed_bkops(card);
 			mq->card->host->context_info.is_urgent = false;
+#endif
+//ASUS_BSP --- lei_guo "mmc bkops stress test"
 			up(&mq->thread_sem);
 			schedule();
 			down(&mq->thread_sem);
@@ -480,6 +563,7 @@ int mmc_queue_suspend(struct mmc_queue *mq, int wait)
 		blk_stop_queue(q);
 		spin_unlock_irqrestore(q->queue_lock, flags);
 
+		mdelay(80);//workaround for eMMC suspend add by lei_guo
 		rc = down_trylock(&mq->thread_sem);
 		if (rc && !wait) {
 			/*

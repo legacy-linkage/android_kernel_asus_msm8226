@@ -49,6 +49,15 @@
 #define WCD9XXX_MBHC_DEF_RLOADS 5
 #define TAPAN_EXT_CLK_RATE 9600000
 
+// wendy4_wang@asus.com
+#include <linux/mfd/pm8xxx/gpio.h>
+#include <linux/switch.h>
+#include <linux/jiffies.h>
+struct wcd9306_hs_struct wcd9306_hs_data;
+EXPORT_SYMBOL(wcd9306_hs_data);
+// wendy4_wang@asus.com
+
+
 #define NUM_OF_AUXPCM_GPIOS 4
 
 #define LO_1_SPK_AMP   0x1
@@ -1971,7 +1980,7 @@ static int msm8226_prepare_codec_mclk(struct snd_soc_card *card)
 	return 0;
 }
 
-static bool msm8226_swap_gnd_mic(struct snd_soc_codec *codec)
+/*static bool msm8226_swap_gnd_mic(struct snd_soc_codec *codec)
 {
 	struct snd_soc_card *card = codec->card;
 	struct msm8226_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
@@ -2007,7 +2016,7 @@ static int msm8226_setup_hs_jack(struct platform_device *pdev,
 		}
 	}
 	return 0;
-}
+}*/
 
 static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 {
@@ -2043,6 +2052,14 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 	int ret;
 	const char *auxpcm_pri_gpio_set = NULL;
 
+   // wendy4_wang@asus.com
+	struct device *dev = &pdev->dev;
+	struct device_node *node, *pp;
+	node = dev->of_node;
+	if (node == NULL)
+		return -ENODEV;
+	// wendy4_wang@asus.com
+
 	if (!pdev->dev.of_node) {
 		dev_err(&pdev->dev, "No platform supplied from device tree\n");
 		return -EINVAL;
@@ -2073,6 +2090,9 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 
 	ret = of_property_read_u32(pdev->dev.of_node,
 			"qcom,tapan-mclk-clk-freq", &pdata->mclk_freq);
+	dev_err(&pdev->dev, "Looking up %s property in node %s",
+			"qcom,tapan-mclk-clk-freq",
+			pdev->dev.of_node->full_name);
 	if (ret) {
 		dev_err(&pdev->dev, "Looking up %s property in node %s failed",
 			"qcom,tapan-mclk-clk-freq",
@@ -2089,6 +2109,10 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 
 	pdata->mclk_gpio = of_get_named_gpio(pdev->dev.of_node,
 				"qcom,cdc-mclk-gpios", 0);
+    dev_err(&pdev->dev,
+			"Looking up %s property in node %s %d\n",
+			"qcom, cdc-mclk-gpios", pdev->dev.of_node->full_name,
+			pdata->mclk_gpio);
 	if (pdata->mclk_gpio < 0) {
 		dev_err(&pdev->dev,
 			"Looking up %s property in node %s failed %d\n",
@@ -2106,6 +2130,39 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 
 	mbhc_cfg.gpio_level_insert = of_property_read_bool(pdev->dev.of_node,
 					"qcom,headset-jack-type-NC");
+
+
+//wendy4_wang@asus.com ++
+   wcd9306_hs_data.hsmic_bias = of_get_named_gpio(pdev->dev.of_node,"qcom,hsmic_bias", 0);
+
+
+	wcd9306_hs_data.hs_path_en = of_get_named_gpio(pdev->dev.of_node,"qcom,hs_path_en", 0);
+
+    printk("Found hsmic_bias gpio=%d,hs_path_en gpio=%d \n",wcd9306_hs_data.hsmic_bias,wcd9306_hs_data.hs_path_en);
+
+	pp = NULL;
+	pp = of_get_next_child(node, pp);
+	if (!of_find_property(pp, "gpios", NULL)) {
+			   printk("Found jack button without gpios \n");
+	}
+
+    wcd9306_hs_data.button_gpio = of_get_gpio(pp, 0);
+
+    wcd9306_hs_data.button_irq =  irq_of_parse_and_map(pp, 0);
+
+	pp = of_get_next_child(node, pp);
+	if (!of_find_property(pp, "gpios", NULL)) {
+			printk("Found jack button without gpios \n");
+	}
+
+	wcd9306_hs_data.jack_gpio = of_get_gpio(pp, 0);
+	wcd9306_hs_data.jack_irq =  irq_of_parse_and_map(pp, 0);
+	printk("Found jack gpio=%d,button gpio=%d \n",wcd9306_hs_data.jack_gpio,wcd9306_hs_data.button_gpio);
+	// avoid mbhc interrupt
+	if (wcd9306_hs_data.hsmic_bias < 0) {
+		mbhc_cfg.insert_detect = false;
+	}
+//wendy4_wang@asus.com ++
 
 	ret = snd_soc_register_card(card);
 	if (ret == -EPROBE_DEFER)
@@ -2162,7 +2219,7 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 		}
 	}
 
-	msm8226_setup_hs_jack(pdev, pdata);
+	//msm8226_setup_hs_jack(pdev, pdata);//wendy4_wang@asus.com ++
 
 	ret = of_property_read_string(pdev->dev.of_node,
 			"qcom,prim-auxpcm-gpio-set", &auxpcm_pri_gpio_set);
@@ -2188,6 +2245,8 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 		goto err_lineout_spkr;
 	}
 
+    pr_err("%s ,******leaving******,jackin gpio=%d\n", __func__,gpio_get_value(wcd9306_hs_data.jack_gpio));
+		ret = -EINVAL;
 	return 0;
 
 err_lineout_spkr:

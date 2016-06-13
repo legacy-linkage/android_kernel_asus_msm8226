@@ -1248,6 +1248,13 @@ static int mmc_blk_issue_discard_rq(struct mmc_queue *mq, struct request *req)
 	if (card->ext_csd.bkops_en)
 		card->bkops_info.sectors_changed += blk_rq_sectors(req);
 
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPEND_TEST
+	if (card->host->suspendtest)
+		card->sectors_changed += blk_rq_sectors(req);
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
+
 	if (mmc_can_discard(card))
 		arg = MMC_DISCARD_ARG;
 	else if (mmc_can_trim(card))
@@ -2178,6 +2185,12 @@ static u8 mmc_blk_prep_packed_list(struct mmc_queue *mq, struct request *req)
 			if (card->ext_csd.bkops_en)
 				card->bkops_info.sectors_changed +=
 					blk_rq_sectors(next);
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPENDTEST
+			if (card->host->suspendtest)
+				card->sectors_changed += blk_rq_sectors(next);
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
 		}
 		list_add_tail(&next->queuelist, &mq->mqrq_cur->packed_list);
 		cur = next;
@@ -2420,6 +2433,12 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 	if (rqc) {
 		if ((card->ext_csd.bkops_en) && (rq_data_dir(rqc) == WRITE))
 			card->bkops_info.sectors_changed += blk_rq_sectors(rqc);
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPENDTEST
+		if ((card->host->suspendtest) && (rq_data_dir(rqc) == WRITE))
+			card->sectors_changed += blk_rq_sectors(rqc);
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
 		reqs = mmc_blk_prep_packed_list(mq, rqc);
 	}
 
@@ -2605,6 +2624,16 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 	struct mmc_host *host = card->host;
 	unsigned long flags;
 
+#ifdef CONFIG_MMC_BKOPS_TEST
+		if (card->host->bkopstest)
+		{
+			card->host->bkops_cost_time = (jiffies - card->host->bkops_start_time)*1000/HZ;
+			if(card->host->bkops_cost_time < 100)
+			{
+				msleep(100);
+			}		
+		}
+#endif
 #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
 	if (mmc_bus_needs_resume(card->host)) {
 		mmc_resume_bus(card->host);

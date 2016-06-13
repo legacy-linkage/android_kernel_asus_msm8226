@@ -22,7 +22,9 @@
 #include <linux/mfd/wcd9xxx/core.h>
 #include <linux/mfd/wcd9xxx/core-resource.h>
 #include <linux/mfd/wcd9xxx/wcd9xxx_registers.h>
-#include <linux/mfd/wcd9xxx/wcd9320_registers.h>
+// wendy4_Wang@asus.com
+#include <linux/mfd/wcd9xxx/wcd9306_registers.h>
+// wendy4_Wang@asus.com
 #include <linux/mfd/wcd9xxx/pdata.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -85,6 +87,10 @@
 #define DEFAULT_STA_WAIT 5000
 
 #define VDDIO_MICBIAS_MV 1800
+
+// wendy4_Wang@asus.com
+extern struct wcd9306_hs_struct wcd9306_hs_data;
+// wendy4_Wang@asus.com
 
 #define WCD9XXX_MICBIAS_PULLDOWN_SETTLE_US 5000
 
@@ -423,6 +429,36 @@ static void wcd9xxx_switch_micbias(struct wcd9xxx_mbhc *mbhc, int vddio_switch)
 {
 	__wcd9xxx_switch_micbias(mbhc, vddio_switch, true, true);
 }
+
+//wendy4_wang@asus.com
+void wcd9xxx_enable_micbias(struct wcd9xxx_mbhc *mbhc, int vddio_switch)
+{
+	struct snd_soc_codec *codec;
+
+	codec = mbhc->codec;
+
+	if (vddio_switch && !mbhc->mbhc_micbias_switched) {
+		/* Enable MIC BIAS Switch to VDDIO */
+		snd_soc_update_bits(codec, WCD9XXX_A_MICB_2_MBHC,
+				    0x80, 0x80);
+		snd_soc_update_bits(codec, WCD9XXX_A_MICB_2_MBHC,
+				    0x10, 0x00);
+		mbhc->mbhc_micbias_switched = true;
+		pr_err("%s: VDDIO switch enabled\n", __func__);
+	} else if (!vddio_switch && mbhc->mbhc_micbias_switched) {
+		/* Disable MIC BIAS Switch to VDDIO */
+		snd_soc_update_bits(codec, WCD9XXX_A_MICB_2_MBHC, 0x80,
+				    0x00);
+		snd_soc_update_bits(codec, WCD9XXX_A_MICB_2_MBHC, 0x10,
+				    0x00);
+		mbhc->mbhc_micbias_switched = false;
+		pr_err("%s: VDDIO switch disabled\n", __func__);
+	}
+}
+EXPORT_SYMBOL_GPL(wcd9xxx_enable_micbias);
+//wendy4_wang@asus.com
+
+
 
 static s16 wcd9xxx_get_current_v(struct wcd9xxx_mbhc *mbhc,
 				 const enum wcd9xxx_current_v_idx idx)
@@ -3887,8 +3923,10 @@ static void wcd9xxx_mbhc_fw_read(struct work_struct *work)
 		retry++;
 		pr_info("%s:Attempt %d to request MBHC firmware\n",
 			__func__, retry);
-		ret = request_firmware(&fw, "wcd9320/wcd9320_mbhc.bin",
-				       codec->dev);
+		// wendy4_Wang@asus.com
+		ret = request_firmware(&fw, "wcd9306/wcd9306_mbhc.bin",
+					codec->dev);
+		// wendy4_Wang@asus.com
 
 		if (ret != 0) {
 			usleep_range(FW_READ_TIMEOUT, FW_READ_TIMEOUT);
@@ -4598,12 +4636,13 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 	}
 
 	if (mbhc->headset_jack.jack == NULL) {
-		ret = snd_soc_jack_new(codec, "Headset Jack", WCD9XXX_JACK_MASK,
+// wendy4_Wang@asus.com:no using qcom mbhc detect jack;
+		/*ret = snd_soc_jack_new(codec, "Headset Jack", WCD9XXX_JACK_MASK,
 				       &mbhc->headset_jack);
 		if (ret) {
 			pr_err("%s: Failed to create new jack\n", __func__);
 			return ret;
-		}
+		}*/
 
 		ret = snd_soc_jack_new(codec, "Button Jack",
 				       WCD9XXX_JACK_BUTTON_MASK,
@@ -4621,6 +4660,66 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 				__func__);
 			return ret;
 		}
+
+// wendy4_Wang@asus.com
+	   if (wcd9306_hs_data.hsmic_bias >= 0) {
+			ret = gpio_request(wcd9306_hs_data.hsmic_bias, "MIC2_BIAS_EN");
+			if (ret) {
+				printk("%s: Failed to request  MIC2_BIAS_EN gpio %d\n", __func__,
+					wcd9306_hs_data.hsmic_bias);
+				return ret;
+			} else
+			  {
+				gpio_direction_output(wcd9306_hs_data.hsmic_bias, 0);
+				printk("%s:set  MIC2_BIAS_EN gpio %d as output 0\n", __func__,
+					wcd9306_hs_data.hsmic_bias);
+			  }
+		}
+
+       if (wcd9306_hs_data.hs_path_en >= 0) {
+	        ret = gpio_request(wcd9306_hs_data.hs_path_en, "HS_PATH_EN");
+			if (ret) {
+				printk("%s: Failed to request HS_PATH_EN gpio %d\n", __func__,
+						wcd9306_hs_data.hs_path_en);
+				return ret;
+			} else{
+				gpio_direction_output(wcd9306_hs_data.hs_path_en, 0);
+				printk("%s:set  HS_PATH_EN gpio %d as output 0\n", __func__,
+					wcd9306_hs_data.hs_path_en);
+					}
+       }
+
+       if (wcd9306_hs_data.jack_gpio >= 0) {
+			ret = gpio_request(wcd9306_hs_data.jack_gpio, "JACK_IN_DET");
+			if (ret) {
+				printk("%s: Failed to request JACK_IN_DET gpio %d\n", __func__, wcd9306_hs_data.jack_gpio);
+				gpio_free(wcd9306_hs_data.jack_gpio);
+			} else
+				{
+				pr_err("%s ,before jackin gpio=%d\n", __func__,gpio_get_value(wcd9306_hs_data.jack_gpio));
+				gpio_direction_input(wcd9306_hs_data.jack_gpio);
+				pr_err("%s ,after jackin gpio=%d\n", __func__,gpio_get_value(wcd9306_hs_data.jack_gpio));
+				printk("%s:set  JACK_IN_DET gpio %d as input\n", __func__,
+					wcd9306_hs_data.jack_gpio);
+				}
+        }
+
+         if (wcd9306_hs_data.button_gpio >= 0) {
+			ret = gpio_request(wcd9306_hs_data.button_gpio, "HS_HOOK_DET");
+			if (ret) {
+				printk("%s: Failed to request wcd9306_hs_data.button_gpio  %d\n", __func__, wcd9306_hs_data.button_gpio);
+				gpio_free(wcd9306_hs_data.button_gpio);
+			} else{
+				printk("---[%s]before gpio_direction_input,  button_gpio=%d---\n",__func__,gpio_get_value(wcd9306_hs_data.button_gpio));
+				gpio_direction_input(wcd9306_hs_data.button_gpio);
+				printk("---[%s]after gpio_direction_input,  button_gpio=%d---\n",__func__,gpio_get_value(wcd9306_hs_data.button_gpio));
+				printk("%s:set  HS_HOOK_DET gpio %d as input\n", __func__,
+					wcd9306_hs_data.button_gpio);
+				}
+         }
+// wendy4_Wang@asus.com
+
+
 
 		INIT_DELAYED_WORK(&mbhc->mbhc_firmware_dwork,
 				  wcd9xxx_mbhc_fw_read);

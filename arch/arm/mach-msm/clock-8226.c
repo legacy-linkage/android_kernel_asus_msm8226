@@ -3288,16 +3288,22 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("dfab_clk",            pnoc_sps_clk.c, "msm_sps"),
 	CLK_LOOKUP("dma_bam_pclk", gcc_bam_dma_ahb_clk.c, "msm_sps"),
 
+//+++ ASUS_BSP Walf_Wu: Support I2C
 	/* I2C Clocks */
-	CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9926000.i2c"),
-	CLK_LOOKUP("core_clk", gcc_blsp1_qup4_i2c_apps_clk.c, "f9926000.i2c"),
+    //CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9926000.i2c"),
+    //CLK_LOOKUP("core_clk", gcc_blsp1_qup4_i2c_apps_clk.c, "f9926000.i2c"),
 
 	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f9927000.i2c"),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup5_i2c_apps_clk.c, "f9927000.i2c"),
 
+    CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f9924000.i2c"),
+    CLK_LOOKUP("core_clk", gcc_blsp1_qup2_i2c_apps_clk.c, "f9924000.i2c"),
+
 	/* I2C Clocks nfc */
-	CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9925000.i2c"),
-	CLK_LOOKUP("core_clk", gcc_blsp1_qup3_i2c_apps_clk.c, "f9925000.i2c"),
+    //CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9925000.i2c"),
+    //CLK_LOOKUP("core_clk", gcc_blsp1_qup3_i2c_apps_clk.c, "f9925000.i2c"),
+//--- ASUS_BSP Walf_Wu: Support I2C
+
 	/* lsuart-v14 Clocks */
 	CLK_LOOKUP("iface_clk",       gcc_blsp1_ahb_clk.c, "f991f000.serial"),
 	CLK_LOOKUP("core_clk", gcc_blsp1_uart3_apps_clk.c, "f991f000.serial"),
@@ -3374,6 +3380,12 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("iface_clk", gcc_pdm_ahb_clk.c, ""),
 	CLK_LOOKUP("iface_clk", gcc_prng_ahb_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_gp1_clk.c, ""),
+	//CLK_LOOKUP("core_clk", gcc_gp1_clk.c, "36.qcom,camera"), //A600kl
+	//CLK_LOOKUP("core_clk", gcc_gp1_clk.c, "37.qcom,camera"), //A600kl
+	CLK_LOOKUP("core_clk", gcc_gp1_clk.c, "24.qcom,camera"), //A500kl
+	CLK_LOOKUP("core_clk", gcc_gp1_clk.c, "10.qcom,camera"), //A500kl
+	CLK_LOOKUP("core_clk", gcc_gp1_clk.c, "3d.qcom,camera"), //A500kl
+
 	CLK_LOOKUP("core_clk", gcc_gp2_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_gp3_clk.c, ""),
 
@@ -3426,6 +3438,16 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6a.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6c.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "20.qcom,camera"),
+	//CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "36.qcom,camera"), //A600kl
+	//CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "37.qcom,camera"), //A600kl
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "24.qcom,camera"), //A500kl
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "10.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "3d.qcom,camera"),
+	//CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "36.qcom,camera"), //A600kl
+	//CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "37.qcom,camera"), //A600kl
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "24.qcom,camera"), //A500kl
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "10.qcom,camera"), //A500kl
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "3d.qcom,camera"), //A500kl
 
 	/* eeprom clocks */
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6c.qcom,eeprom"),

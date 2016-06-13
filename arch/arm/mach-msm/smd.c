@@ -54,6 +54,7 @@
 #include "smd_private.h"
 #include "modem_notifier.h"
 #include "smem_private.h"
+#include <linux/gpio.h> //ASUS-BBSP Read Modem SKU GPIO+
 
 #define SMD_VERSION 0x00020000
 #define SMSM_SNAPSHOT_CNT 64
@@ -224,6 +225,13 @@ static inline void smd_write_intr(unsigned int val,
 
 #define SMD_LOOPBACK_CID 100
 
+//ASUS-BBSP Read Modem SKU GPIO+++
+#define MODEM_SKU_GPIO_108 108
+#define MODEM_SKU_GPIO_109 109
+static int modemsku = 0;
+module_param(modemsku, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+//ASUS-BBSP Read Modem SKU GPIO---
+
 static LIST_HEAD(smd_ch_list_loopback);
 static void smd_fake_irq_handler(unsigned long arg);
 static void smsm_cb_snapshot(uint32_t use_wakelock);
@@ -332,6 +340,100 @@ static inline void notify_rpm_smd(smd_channel_t *ch)
 		intr->out_base + intr->out_offset);
 	}
 }
+
+// ASUS_BSP+++ "log SMD wake up packet"
+#define QMI_RX_SVC_INDEX 4
+#define QMI_RX_TYPE_INDEX 6
+#define QMI_RX_MSG_INDEX 9
+static bool is_smsm_pm_suspend = false;
+
+struct smd_qmi_ch_type {
+	const char *name;
+	unsigned n;
+};
+
+static struct smd_qmi_ch_type smd_qmi_ch_tab[] = {
+	{ "DATA5_CNTL", -1},
+	{ "DATA6_CNTL", -1},
+	{ "DATA7_CNTL", -1},
+	{ "DATA8_CNTL", -1},
+	{ "DATA9_CNTL", -1},
+	{ "DATA12_CNTL", -1},
+	{ "DATA13_CNTL", -1},
+	{ "DATA14_CNTL", -1}
+};
+
+static const char *qmi_service_name_asus[] = {
+	"00", "WDS", "DMS", "NAS", "QOS",
+	"WMS", "06", "EAP", "ATCOP", "VOICE",
+	"CAT", "UIM", "PBM", "13", "14",
+	"15", "GPS", "SAR", "IMS_VIDEO", "19",
+	"CSD", "21", "22", "23", "THERMAL"
+};
+
+static const char *smd_type_name[] = {
+	"APPS_MODEM",
+	"APPS_QDSP",
+	"MODEM_QDSP",
+	"APPS_DSPS",
+	"MODEM_DSPS",
+	"QDSP_DSPS",
+	"APPS_WCNSS",
+	"MODEM_WCNSS",
+	"QDSP_WCNSS",
+	"DSPS_WCNSS",
+	"APPS_Q6FW",
+	"MODEM_Q6FW",
+	"QDSP_Q6FW",
+	"DSPS_Q6FW",
+	"WCNSS_Q6FW"
+};
+
+static void set_smd_qmi_ch_tab(const char* name, unsigned n)
+{
+	int i;
+	for (i = 0; i < sizeof(smd_qmi_ch_tab) / sizeof(*smd_qmi_ch_tab); ++i) {
+		if (!strcmp(smd_qmi_ch_tab[i].name, name)) {
+			smd_qmi_ch_tab[i].n = n;
+			break;
+		}
+	}
+}
+
+static void log_smd_pkt_out_of_suspend(smd_channel_t *ch, void *data, int size)
+{
+	int i;
+
+	if (!is_smsm_pm_suspend || ch->type >= SMD_APPS_RPM) {
+		return;
+	}
+	is_smsm_pm_suspend = false;
+	if (ch->type != SMD_APPS_MODEM) {
+		pr_info("[SMD]type=%s ch=%s\n", smd_type_name[ch->type], ch->name);
+		return ;
+	}
+	for (i = 0; i < sizeof(smd_qmi_ch_tab) / sizeof(*smd_qmi_ch_tab); ++i) {
+		if (smd_qmi_ch_tab[i].n == ch->n) {
+			u8 *buf = (u8 *)data;
+			if (size > QMI_RX_MSG_INDEX) {
+				u8 svc_id = buf[QMI_RX_SVC_INDEX];
+				if (svc_id < (sizeof(qmi_service_name_asus)/sizeof(*qmi_service_name_asus))) {
+					pr_info("[SMD]svc %s type %u msg %u\n", qmi_service_name_asus[svc_id],
+					        buf[QMI_RX_TYPE_INDEX], buf[QMI_RX_MSG_INDEX]);
+				}
+				else {
+					pr_info("[SMD]svc %u type %u msg %u\n", svc_id,
+					        buf[QMI_RX_TYPE_INDEX], buf[QMI_RX_MSG_INDEX]);
+				}
+			} else {
+				pr_info("[SMD]type=%s ch=%s\n", smd_type_name[ch->type], ch->name);
+			}
+			return;
+		}
+	}
+	pr_info("[SMD]type=%s ch=%s\n", smd_type_name[ch->type], ch->name);
+}
+// ASUS_BSP--- "log SMD wake up packet"
 
 static inline void notify_modem_smsm(void)
 {
@@ -443,6 +545,7 @@ static int smsm_pm_notifier(struct notifier_block *nb,
 {
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
+		is_smsm_pm_suspend = true; // ASUS_BSP+ "log SMD wake up packet"
 		smsm_change_state(SMSM_APPS_STATE, SMSM_PROC_AWAKE, 0);
 		break;
 
@@ -1795,6 +1898,7 @@ static int smd_alloc_channel(struct smd_alloc_elm *alloc_elm, int table_id,
 	ch->pdev.name = ch->name;
 	ch->pdev.id = ch->type;
 
+	set_smd_qmi_ch_tab(ch->name, ch->n); // ASUS_BSP+ "log SMD wake up packet"
 	SMD_INFO("smd_alloc_channel() '%s' cid=%d\n",
 		 ch->name, ch->n);
 
@@ -2153,23 +2257,27 @@ EXPORT_SYMBOL(smd_write_segment_avail);
 
 int smd_read(smd_channel_t *ch, void *data, int len)
 {
+	int size;
 	if (!ch) {
 		pr_err("%s: Invalid channel specified\n", __func__);
 		return -ENODEV;
 	}
-
-	return ch->read(ch, data, len, 0);
+	size = ch->read(ch, data, len, 0);
+	log_smd_pkt_out_of_suspend(ch, data, size); // ASUS_BSP+ "log SMD wake up packet"
+	return size;
 }
 EXPORT_SYMBOL(smd_read);
 
 int smd_read_user_buffer(smd_channel_t *ch, void *data, int len)
 {
+	int size;
 	if (!ch) {
 		pr_err("%s: Invalid channel specified\n", __func__);
 		return -ENODEV;
 	}
-
-	return ch->read(ch, data, len, 1);
+	size = ch->read(ch, data, len, 1);
+	log_smd_pkt_out_of_suspend(ch, data, size); // ASUS_BSP+ "log SMD wake up packet"
+	return size;
 }
 EXPORT_SYMBOL(smd_read_user_buffer);
 
@@ -3323,6 +3431,12 @@ int __init msm_smd_init(void)
 	int rc;
 	int i;
 
+	//ASUS-BBSP Read Modem SKU GPIO+++
+	int ret;
+	int gpio_108_value = 0;
+	int gpio_109_value = 0;
+	//ASUS-BBSP Read Modem SKU GPIO---
+
 	if (registered)
 		return 0;
 
@@ -3359,6 +3473,42 @@ int __init msm_smd_init(void)
 			__func__, rc);
 		return rc;
 	}
+
+	//ASUS-BBSP Read Modem SKU GPIO+++
+	/*
+	 * Modem SKU  GPIO_109 GPIO_108 Note
+	 * Modem_SKU0 0        0        CN (Default)
+	 * Modem_SKU1 0        1        TWN/APAC
+	 * Modem_SKU2 1        0        EU/WW
+	 * Modem_SKU3 1        1        JP
+	 */
+	ret = gpio_request(MODEM_SKU_GPIO_108, "MODEM_SKU_GPIO_108");
+	if (ret<0) {
+	  printk("gpio_request failed for gpio %d\n", MODEM_SKU_GPIO_108);
+	} else {
+	  gpio_108_value = gpio_get_value(MODEM_SKU_GPIO_108);
+	}
+
+	ret = gpio_request(MODEM_SKU_GPIO_109, "MODEM_SKU_GPIO_109");
+	if (ret<0) {
+	  printk("gpio_request failed for gpio %d\n", MODEM_SKU_GPIO_109);
+	} else {
+	  gpio_109_value = gpio_get_value(MODEM_SKU_GPIO_109);
+	}
+
+	if (gpio_108_value == 1) {
+		modemsku += 1;
+	}
+	if (gpio_109_value == 1) {
+		modemsku += 2;
+	}
+
+	printk("modemsku = %d;gpio_108_value = %d;gpio_109_value = %d\n", modemsku,gpio_108_value,gpio_109_value);
+
+	gpio_free(MODEM_SKU_GPIO_108);
+	gpio_free(MODEM_SKU_GPIO_109);
+	//ASUS-BBSP Read Modem SKU GPIO---
+
 	return 0;
 }
 

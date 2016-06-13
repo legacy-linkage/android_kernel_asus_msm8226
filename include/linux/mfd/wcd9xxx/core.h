@@ -18,6 +18,9 @@
 #include <linux/of_irq.h>
 #include <linux/mfd/wcd9xxx/core-resource.h>
 
+// wendy4_wang@asus.com
+extern int codec_status;
+// wendy4_wang@asus.com
 
 #define WCD9XXX_SLIM_NUM_PORT_REG 3
 #define TABLA_VERSION_1_0	0

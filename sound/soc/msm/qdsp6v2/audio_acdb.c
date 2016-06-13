@@ -1255,6 +1255,14 @@ err_done:
 	acdb_data.mem_len = 0;
 	return result;
 }
+
+//mei_huang@asus.com +++
+int gRingtone_state = 0;
+int g_flag_csvoice_fe_connected = 0;
+int gSKYPE_state = 0;
+int gVR_state = 0;
+//mei_huang@asus.com ---
+
 static long acdb_ioctl(struct file *f,
 		unsigned int cmd, unsigned long arg)
 {
@@ -1375,6 +1383,57 @@ static long acdb_ioctl(struct file *f,
 	case AUDIO_SET_HW_DELAY_TX:
 		result = store_hw_delay(TX_CAL, (void *)arg);
 		goto done;
+//mei_huang@asus.com +++
+	case AUDIO_SET_RINGTONE_STATE:
+		if (copy_from_user(&gRingtone_state, (void *)arg,
+			sizeof(gRingtone_state))) {
+			pr_err("%s: fail to copy gRingtone_state!\n", __func__);
+			result = -EFAULT;
+		}
+		goto done;
+	case AUDIO_GET_RINGTONE_STATE:
+		if (copy_to_user((void *)arg, &gRingtone_state,
+			sizeof(gRingtone_state))) {
+			pr_err("%s: fail to copy gRingtone_state!!\n", __func__);
+			result = -EFAULT;
+		}
+		goto done;
+	case AUDIO_SET_INCALL_STATE:
+		if (copy_from_user(&g_flag_csvoice_fe_connected, (void *)arg,
+			sizeof(g_flag_csvoice_fe_connected))) {
+			pr_err("%s: fail to copy g_flag_csvoice_fe_connected!\n", __func__);
+			result = -EFAULT;
+		}
+		goto done;
+	case AUDIO_SET_SKYPE_STATE:
+		if (copy_from_user(&gSKYPE_state, (void *)arg,
+			sizeof(gSKYPE_state))) {
+			pr_err("%s: fail to copy gSKYPE_state!\n", __func__);
+			result = -EFAULT;
+		}
+		goto done;
+	case AUDIO_GET_SKYPE_STATE:
+		if (copy_to_user((void *)arg, &gSKYPE_state,
+			sizeof(gSKYPE_state))) {
+			pr_err("%s: fail to copy gSKYPE_state!!\n", __func__);
+			result = -EFAULT;
+		}
+		goto done;
+	case AUDIO_SET_VR_STATE:
+		if (copy_from_user(&gVR_state, (void *)arg,
+			sizeof(gVR_state))) {
+			pr_err("%s: fail to copy gVR_state!\n", __func__);
+			result = -EFAULT;
+		}
+		goto done;
+	case AUDIO_GET_VR_STATE:
+		if (copy_to_user((void *)arg, &gVR_state,
+			sizeof(gVR_state))) {
+			pr_err("%s: fail to copy gVR_state!!\n", __func__);
+			result = -EFAULT;
+		}
+		goto done;
+//mei_huang@asus.com ---
 	}
 
 	if (copy_from_user(&size, (void *) arg, sizeof(size))) {

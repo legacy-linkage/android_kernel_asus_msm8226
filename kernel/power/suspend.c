@@ -29,6 +29,10 @@
 
 #include "power.h"
 
+//[CR]
+#include <linux/wakelock.h>
+int pmsp_flag = 0;
+
 const char *const pm_states[PM_SUSPEND_MAX] = {
 #ifdef CONFIG_EARLYSUSPEND
 	[PM_SUSPEND_ON]		= "on",
@@ -197,6 +201,20 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	return error;
 }
 
+//Add a timer to trigger wakelock debug
+void print_active_locks(void);
+void unattended_timer_expired(unsigned long data);
+DEFINE_TIMER(unattended_timer, unattended_timer_expired, 0, 0);
+
+void unattended_timer_expired(unsigned long data)
+{
+    pr_info("[PM]unattended_timer_expired\n");
+    ASUSEvtlog("[PM]unattended_timer_expired\n");
+    pmsp_flag=1;
+    print_active_locks();
+	mod_timer(&unattended_timer, jiffies + msecs_to_jiffies(PM_UNATTENDED_TIMEOUT));
+}
+
 /**
  * suspend_devices_and_enter - Suspend devices and enter system sleep state.
  * @state: System sleep state to enter.
@@ -215,6 +233,11 @@ int suspend_devices_and_enter(suspend_state_t state)
 		if (error)
 			goto Close;
 	}
+
+	//Add a timer to trigger wakelock debug
+    pr_info("[PM]unattended_timer: del_timer\n");
+    del_timer ( &unattended_timer );
+
 	suspend_console();
 	suspend_test_start();
 	error = dpm_suspend_start(PMSG_SUSPEND);
@@ -236,6 +259,11 @@ int suspend_devices_and_enter(suspend_state_t state)
 	dpm_resume_end(PMSG_RESUME);
 	suspend_test_finish("resume devices");
 	resume_console();
+
+	//Add a timer to trigger wakelock debug
+    pr_info("[PM]unattended_timer: mod_timer\n");
+    mod_timer(&unattended_timer, jiffies + msecs_to_jiffies(PM_UNATTENDED_TIMEOUT));
+
  Close:
 	if (suspend_ops->end)
 		suspend_ops->end();
@@ -323,12 +351,19 @@ static void pm_suspend_marker(char *annotation)
  * Check if the value of @state represents one of the supported states,
  * execute enter_state() and update system suspend statistics.
  */
+//ASUS_BSP+++ Eric5_Ou "register early suspend notification for none mode switch"
+extern void asus_otg_host_power_off(void);
+//ASUS_BSP--- Eric5_Ou "register early suspend notification for none mode switch"
 int pm_suspend(suspend_state_t state)
 {
 	int error;
 
 	if (state <= PM_SUSPEND_ON || state >= PM_SUSPEND_MAX)
 		return -EINVAL;
+
+	//ASUS_BSP+++ Eric5_Ou "register early suspend notification for none mode switch"
+	asus_otg_host_power_off();
+	//ASUS_BSP--- Eric5_Ou "register early suspend notification for none mode switch"
 
 	pm_suspend_marker("entry");
 	error = enter_state(state);

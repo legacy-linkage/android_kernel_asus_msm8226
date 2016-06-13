@@ -27,6 +27,10 @@
 #include <linux/radix-tree.h>
 #include <linux/qpnp/pwm.h>
 
+//ASUS_BSP+++ jeff_gu inserting 10mS delay here to fix blink failure
+#include <linux/delay.h>
+//ASUS_BSP--- jeff_gu inserting 10mS delay here to fix blink failure
+
 #define QPNP_LPG_DRIVER_NAME	"qcom,qpnp-pwm"
 #define QPNP_LPG_CHANNEL_BASE	"qpnp-lpg-channel-base"
 #define QPNP_LPG_LUT_BASE	"qpnp-lpg-lut-base"
@@ -1032,6 +1036,13 @@ static int qpnp_lpg_configure_lut_state(struct pwm_device *pwm,
 
 	addr = SPMI_LPG_REG_ADDR(lpg_config->base_addr,
 				QPNP_ENABLE_CONTROL);
+
+	//ASUS_BSP+++ jeff_gu inserting 10mS delay here to fix blink failure
+	if(0 == pwm->pwm_config.channel_id || 5 == pwm->pwm_config.channel_id)
+	{
+		mdelay(10);
+	}
+	//ASUS_BSP--- jeff_gu inserting 10mS delay here to fix blink failure
 
 	rc = qpnp_lpg_save_and_write(value2, mask2, reg2,
 					addr, 1, chip);

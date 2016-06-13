@@ -33,7 +33,9 @@ static LIST_HEAD(clk_list);
 static DEFINE_SPINLOCK(clk_list_lock);
 
 static struct dentry *debugfs_base;
-static u32 debug_suspend;
+//[ChiaYuan][+++]: add more debugmsg about clock during suspend
+static u32 debug_suspend = 1;
+//[ChiaYuan][---]: add more debugmsg about clock during suspend
 
 struct clk_table {
 	struct list_head node;

@@ -32,7 +32,12 @@
 #ifndef CONFIG_LOGCAT_SIZE
 #define CONFIG_LOGCAT_SIZE 256
 #endif
-
+//ASUSDEBUG + jeffery_hu@asus.com
+//thomas_chu +++
+#include <linux/asus_global.h>
+extern struct _asus_global asus_global;
+//thomas_chu ---
+//ASUSDEBUG -
 /*
  * struct logger_log - represents a specific log, such as 'main' or 'radio'
  *
@@ -447,6 +452,7 @@ static ssize_t do_write_log_from_user(struct logger_log *log,
  * writev(), and aio_write(). Writes are our fast path, and we try to optimize
  * them above all else.
  */
+extern unsigned int asusdebug_enable;//ASUSDEBUG jeffery_hu@asus.com
 ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 			 unsigned long nr_segs, loff_t ppos)
 {
@@ -455,7 +461,10 @@ ssize_t logger_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	struct logger_entry header;
 	struct timespec now;
 	ssize_t ret = 0;
-
+	//ASUSDEBUG + jeffery_hu@asus.com
+	if (asusdebug_enable==0x11223344)
+		return 0;
+	//ASUSDEBUG -
 	now = current_kernel_time();
 
 	header.pid = current->tgid;
@@ -788,6 +797,18 @@ static int __init logger_init(void)
 		goto out;
 
 out:
+//ASUSDEBUG + jeffery_hu@asus.com
+//thomas_chu +++
+	asus_global.log_main_addr = (char*)(&(log_main));
+	asus_global.sizeof_log_main=sizeof(log_main);
+	asus_global.log_system_addr = (char*)(&log_system);
+	asus_global.sizeof_log_system=sizeof(log_system);
+	asus_global.log_events_addr = (char*)(&log_events);
+	asus_global.sizeof_log_events=sizeof(log_events);
+	asus_global.log_radio_addr = (char*)(&log_radio);
+	asus_global.sizeof_log_radio=sizeof(log_radio);
+//thomas_chu ---
+//ASUSDEBUG -
 	return ret;
 }
 device_initcall(logger_init);

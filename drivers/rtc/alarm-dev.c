@@ -57,7 +57,7 @@ static uint32_t alarm_enabled;
 static uint32_t wait_pending;
 
 static struct alarm alarms[ANDROID_ALARM_TYPE_COUNT];
-
+int asus_rtc_set = 0;//ASUSDEBUG jeffery_hu@asus.com
 static long alarm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int rv = 0;
@@ -164,6 +164,29 @@ from_old_alarm_set:
 		alarm_pending |= ANDROID_ALARM_TIME_CHANGE_MASK;
 		wake_up(&alarm_wait_queue);
 		spin_unlock_irqrestore(&alarm_slock, flags);
+		//ASUSDEBUG + jeffery_hu@asus.com
+		{ //to get correct time for last shutdown log +++++++++++
+			extern int g_saving_rtb_log;
+			unsigned int *last_shutdown_log_addr;
+			void get_last_shutdown_log(void);
+			void save_rtb_log(void);	           
+			//printk("rtc: get_last_shutdown_log ###ANDROID_ALARM_SET_RTC  asus_rtc_set=%d ###############################################\n", asus_rtc_set);
+			last_shutdown_log_addr = (unsigned int *)((unsigned int)PRINTK_BUFFER + (unsigned int)PRINTK_BUFFER_SLOT_SIZE);
+
+			if(!asus_rtc_set)
+			{  
+				asus_rtc_set = 1;
+				get_last_shutdown_log();       
+				printk("rtc: get_last_shutdown_log: last_shutdown_log_addr=0x%08x, value=0x%08x\n",
+					(unsigned int)last_shutdown_log_addr, *last_shutdown_log_addr);
+				if ( (*last_shutdown_log_addr)==(unsigned int)PRINTK_BUFFER_MAGIC )
+					save_rtb_log();   
+
+				(*last_shutdown_log_addr)=(unsigned int)PRINTK_BUFFER_MAGIC;
+			}
+			g_saving_rtb_log = 0;
+        	}//to get correct time for last shutdown log ------------
+        	//ASUSDEBUG -		
 		if (rv < 0)
 			goto err1;
 		break;

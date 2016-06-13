@@ -323,6 +323,8 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		task_unlock(p);
 		if (tasksize <= 0)
 			continue;
+		if ((p->signal->oom_adj <= 2)&&(0 == strcmp(p->comm,"d.process.media")))
+			continue;
 		if (selected) {
 			if (oom_score_adj < selected_oom_score_adj)
 				continue;
@@ -347,8 +349,10 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		rcu_read_unlock();
 		/* give the system time to free up the memory */
 		msleep_interruptible(20);
-	} else
+	} else {
+		lowmem_print(4, "selected no process to be killed\n");
 		rcu_read_unlock();
+	}
 
 	lowmem_print(4, "lowmem_shrink %lu, %x, return %d\n",
 		     nr_to_scan, sc->gfp_mask, rem);

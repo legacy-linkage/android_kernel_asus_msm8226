@@ -259,6 +259,156 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 
 EXPORT_SYMBOL(mmc_request_done);
 
+//ASUS_BSP +++ lei_guo "mmc cmd statistics"
+#define INAND_CMD38_ARG_EXT_CSD  113
+#define INAND_CMD38_ARG_ERASE    0x00
+#define INAND_CMD38_ARG_TRIM     0x01
+#define INAND_CMD38_ARG_SECERASE 0x80
+#define INAND_CMD38_ARG_SECTRIM1 0x81
+#define INAND_CMD38_ARG_SECTRIM2 0x88
+
+/**
+ *	mmc_do_cmd_stats - do mmc command statistics
+ *	@card: MMC card to do command statistics
+ *	@mrq: MMC request which request
+ *
+ */
+void mmc_do_cmd_stats(struct mmc_card	*card, struct mmc_request *mrq)
+{
+	u32 set;
+	u32 index;
+	u32 value;
+
+	if (!card || !card->cmd_stats || !mmc_card_mmc(card) || !card->cmd_stats->enabled) {
+		pr_debug("%s, not do cmd statistics\n", __func__);
+		return;
+	}
+
+	if (mrq->cmd->opcode > 60)
+		pr_err("%s: unknown cmd:%u", mmc_hostname(card->host), mrq->cmd->opcode );
+
+	if (mrq->sbc) {
+		card->cmd_stats->cmd_cnt[mrq->sbc->opcode]++;
+		if (MMC_SET_BLOCK_COUNT == mrq->sbc->opcode) {
+			if (mrq->sbc->arg & (1 << 29))
+				card->cmd_stats->do_data_tag_cnt++;
+				
+			if (mrq->sbc->arg & (1 << 31))
+				card->cmd_stats->do_rel_wr_cnt++;
+		}
+
+	}
+
+	card->cmd_stats->cmd_cnt[mrq->cmd->opcode]++;
+
+	if (mrq->stop) {
+		card->cmd_stats->cmd_cnt[mrq->stop->opcode]++;
+	}
+
+	if (MMC_READ_MULTIPLE_BLOCK == mrq->cmd->opcode || MMC_READ_SINGLE_BLOCK == mrq->cmd->opcode) {
+		if (mrq->data)
+			card->cmd_stats->rdata_sz += (mrq->data->blocks * mrq->data->blksz);
+	}
+
+	if (MMC_WRITE_MULTIPLE_BLOCK == mrq->cmd->opcode || MMC_WRITE_BLOCK == mrq->cmd->opcode) {
+		if (mrq->data)
+			card->cmd_stats->wdata_sz += (mrq->data->blocks * mrq->data->blksz);
+	}
+
+	if ( (MMC_STOP_TRANSMISSION == mrq->cmd->opcode || MMC_SEND_STATUS == mrq->cmd->opcode) && 
+	    (mrq->cmd->arg & 1)) {
+		card->cmd_stats->hpi_cnt++;
+	}	
+
+	if (MMC_ERASE == mrq->cmd->opcode) {
+		if (mrq->cmd->arg == MMC_ERASE_ARG)
+			card->cmd_stats->erase_cnt++;
+		else if (mrq->cmd->arg == MMC_TRIM_ARG)
+			card->cmd_stats->trim_cnt++;
+		else if (mrq->cmd->arg == MMC_DISCARD_ARG)
+			card->cmd_stats->discard_cnt++;
+	}
+
+	if (MMC_SWITCH == mrq->cmd->opcode) {
+		set = mrq->cmd->arg & 0x000000ff;
+		if (set == EXT_CSD_CMD_SET_NORMAL) {
+			index = (mrq->cmd->arg & 0x00ff0000) >> 16;
+			value = (mrq->cmd->arg & 0x0000ff00) >> 8;
+
+			switch (index) {
+			case EXT_CSD_FLUSH_CACHE:
+				card->cmd_stats->flush_cache_cnt++;
+				break;
+			case EXT_CSD_CACHE_CTRL:
+				if (value)
+					card->cmd_stats->cache_on_cnt++;
+				else
+					card->cmd_stats->cache_off_cnt++;
+				break;
+			case EXT_CSD_POWER_OFF_NOTIFICATION:
+				if (value == EXT_CSD_POWER_ON)
+					card->cmd_stats->pwr_on_cnt++;
+				else if (value == EXT_CSD_POWER_OFF_SHORT)
+					card->cmd_stats->pwr_off_short_cnt++;
+				else if (value == EXT_CSD_POWER_OFF_LONG)
+					card->cmd_stats->pwr_off_long_cnt++;
+				break;
+			case EXT_CSD_BKOPS_START:
+				card->cmd_stats->bkops_start_cnt++;	
+				break;
+			case EXT_CSD_SANITIZE_START:
+				card->cmd_stats->sanitize_cnt++;	
+				break;
+			case EXT_CSD_BOOT_WP:
+				card->cmd_stats->boot_wp_cnt++;
+				break;
+			case EXT_CSD_PART_CONFIG:
+				card->cmd_stats->part_cfg_cnt++;
+				break;
+			case EXT_CSD_POWER_CLASS:
+				card->cmd_stats->pwr_cls_cnt++;
+				break;
+			case EXT_CSD_BUS_WIDTH:
+				card->cmd_stats->bus_width_cnt++;
+				break;
+			case EXT_CSD_HS_TIMING:
+				card->cmd_stats->hs_timing_cnt++;
+				break;
+			case EXT_CSD_ERASE_GROUP_DEF:
+				card->cmd_stats->erase_grp_def_cnt++;
+				break;
+			case EXT_CSD_HPI_MGMT:
+				card->cmd_stats->hpi_mgmt_cnt++;
+				break;
+			case EXT_CSD_EXP_EVENTS_CTRL:
+				card->cmd_stats->exp_events_ctrl_cnt++;
+				break;
+			case INAND_CMD38_ARG_EXT_CSD:
+				if (value == INAND_CMD38_ARG_TRIM)
+					card->cmd_stats->cmd38_trim_cnt++;
+				else if (value == INAND_CMD38_ARG_ERASE)
+					card->cmd_stats->cmd38_erase_cnt++;
+				else if (value == INAND_CMD38_ARG_SECTRIM1)
+					card->cmd_stats->cmd38_sectrim1_cnt++;
+				else if (value == INAND_CMD38_ARG_SECERASE)
+					card->cmd_stats->cmd38_secerase_cnt++;				
+				else if (value == INAND_CMD38_ARG_SECTRIM2)
+					card->cmd_stats->cmd38_sectrim2_cnt++;
+				break;
+			case EXT_CSD_BKOPS_EN:
+				card->cmd_stats->bkops_en_cnt++;
+				break;
+			default:
+				break;
+			}
+
+		}
+	}
+
+
+}
+//ASUS_BSP --- lei_guo "mmc cmd statistics"
+
 static void
 mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 {
@@ -266,6 +416,10 @@ mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 	unsigned int i, sz;
 	struct scatterlist *sg;
 #endif
+
+//ASUS_BSP +++ lei_guo "mmc cmd statistics"
+	mmc_do_cmd_stats(host->card, mrq);
+//ASUS_BSP --- lei_guo "mmc cmd statistics"
 
 	if (mrq->sbc) {
 		pr_debug("<%s: starting CMD%u arg %08x flags %08x>\n",
@@ -477,8 +631,17 @@ void mmc_start_bkops(struct mmc_card *card, bool from_exception)
 		mmc_card_set_need_bkops(card);
 		goto out;
 	}
-	pr_info("%s: %s: Starting bkops\n", mmc_hostname(card->host), __func__);
-
+	pr_info("%s: %s: Starting bkops with raw_bkops_status:0x%x\n",
+		mmc_hostname(card->host), __func__, card->ext_csd.raw_bkops_status);
+#ifdef CONFIG_MMC_BKOPS_TEST
+		if (card->host->bkopstest)
+		{
+			card->host->bkops_startcnt++;
+			card->host->bkops_start_time = jiffies;
+			card->host->bkops_cost_time = 0;
+			card->bkops_info.sectors_changed = 0;
+		}
+#endif
 	err = __mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 			EXT_CSD_BKOPS_START, 1, 0, false, false);
 	if (err) {
@@ -1066,6 +1229,16 @@ int mmc_interrupt_hpi(struct mmc_card *card)
 
 	err = mmc_send_hpi_cmd(card, &status);
 
+	if (err)
+	{
+		pr_err("%s: send hpi err:%d\n", mmc_hostname(card->host), err);
+		goto out;
+	}
+	else
+	{
+		pr_info("%s: send hpi done\n", mmc_hostname(card->host));
+	}
+
 	prg_wait = jiffies + msecs_to_jiffies(card->ext_csd.out_of_int_time);
 	do {
 		err = mmc_send_status(card, &status);
@@ -1153,7 +1326,14 @@ int mmc_stop_bkops(struct mmc_card *card)
 		err = -EBUSY;
 		goto out;
 	}
-
+#ifdef CONFIG_MMC_BKOPS_TEST
+	if (card->host->bkopstest)
+	{
+		card->host->bkops_stopcnt++;
+		//card->host->bkops_cost_time = (jiffies - card->host->bkops_start_time)*1000/HZ;
+		//printk("bkops  card->host->bkops_cost_time: %ld msecs", card->host->bkops_cost_time);
+	}
+#endif
 	err = mmc_interrupt_hpi(card);
 
 	/*
@@ -2431,39 +2611,55 @@ EXPORT_SYMBOL(mmc_can_erase);
 
 int mmc_can_trim(struct mmc_card *card)
 {
+//ASUS_BSP +++ lei_guo "disable discard/trim"
+#if 0
 	if (card->ext_csd.sec_feature_support & EXT_CSD_SEC_GB_CL_EN)
 		return 1;
+#endif
+//ASUS_BSP --- lei_guo "disable discard/trim"
 	return 0;
 }
 EXPORT_SYMBOL(mmc_can_trim);
 
 int mmc_can_discard(struct mmc_card *card)
 {
+//ASUS_BSP +++ lei_guo "disable discard/trim"
+#if 0
 	/*
 	 * As there's no way to detect the discard support bit at v4.5
 	 * use the s/w feature support filed.
 	 */
 	if (card->ext_csd.feature_support & MMC_DISCARD_FEATURE)
 		return 1;
+#endif
 	return 0;
+//ASUS_BSP --- lei_guo "disable discard/trim"
 }
 EXPORT_SYMBOL(mmc_can_discard);
 
 int mmc_can_sanitize(struct mmc_card *card)
 {
+//ASUS_BSP +++ lei_guo "disable sanitize"
+#if 0
 	if (!mmc_can_trim(card) && !mmc_can_erase(card))
 		return 0;
 	if (card->ext_csd.sec_feature_support & EXT_CSD_SEC_SANITIZE)
 		return 1;
+#endif
 	return 0;
+//ASUS_BSP --- lei_guo "disable sanitize"
 }
 EXPORT_SYMBOL(mmc_can_sanitize);
 
 int mmc_can_secure_erase_trim(struct mmc_card *card)
 {
+//ASUS_BSP +++ lei_guo "disable discard/trim"
+#if 0
 	if (card->ext_csd.sec_feature_support & EXT_CSD_SEC_ER_EN)
 		return 1;
+#endif
 	return 0;
+//ASUS_BSP --- lei_guo "disable discard/trim"
 }
 EXPORT_SYMBOL(mmc_can_secure_erase_trim);
 
@@ -3341,7 +3537,13 @@ int mmc_card_can_sleep(struct mmc_host *host)
 {
 	struct mmc_card *card = host->card;
 
-	if (card && mmc_card_mmc(card) && card->ext_csd.rev >= 3)
+//only enable CMD5 for hynix 4.5
+	if (card && mmc_card_mmc(card) && card->ext_csd.rev == 0x6
+		&& card->mmc_info && !strncmp(card->mmc_info, "Hynix", 5))
+		return 1;
+//enable CMD5 for sandisk 5.0
+	if (card && mmc_card_mmc(card) && card->ext_csd.rev == 0x7
+		&& card->mmc_info && card->cid.manfid == 0x45)
 		return 1;
 	return 0;
 }

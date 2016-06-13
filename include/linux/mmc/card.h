@@ -14,6 +14,9 @@
 #include <linux/mmc/core.h>
 #include <linux/mod_devicetable.h>
 #include <linux/notifier.h>
+//ASUS_BSP +++ lei_guo "mmc cmd statistics"
+#include <linux/android_alarm.h>
+//ASUS_BSP --- lei_guo "mmc cmd statistics"
 
 struct mmc_cid {
 	unsigned int		manfid;
@@ -105,7 +108,14 @@ struct mmc_ext_csd {
 	u8			raw_trim_mult;		/* 232 */
 	u8			raw_bkops_status;	/* 246 */
 	u8			raw_sectors[4];		/* 212 - 4 bytes */
+//ASUS_BSP +++ lei_guo "Sandisk's eMMC health status feature"
+//0: not supported, 1: 0%-10%, 2: 10%-20%, ..., 11: More than 100%
+	u8			slc_health;		/* 87 */
+	u8			mlc_lp_health;	/* 88, enhanced partition's memory */
+	u8			mlc_health;		/* 94 */
+//ASUS_BSP --- lei_guo "Sandisk's eMMC health status feature"
 
+	u8          device_life_time[3];/* 268  269*/       //ASUS_BSP Lei_guo: add for DEVICE_LIFE_TIME_EST_TYP of eMMC
 	unsigned int            feature_support;
 #define MMC_DISCARD_FEATURE	BIT(0)                  /* CMD38 feature */
 };
@@ -309,6 +319,48 @@ struct mmc_bkops_info {
 #define BKOPS_SIZE_PERCENTAGE_TO_QUEUE_DELAYED_WORK 1 /* 1% */
 };
 
+//ASUS_BSP +++ lei_guo "mmc cmd statistics"
+struct mmc_cmd_stats {
+	spinlock_t		lock;
+	bool			print_stats;
+	bool 			enabled;
+	unsigned int	cmd_cnt[60];
+	unsigned long long	rdata_sz;
+	unsigned long long	wdata_sz;
+	unsigned int	do_data_tag_cnt;
+	unsigned int	do_rel_wr_cnt;
+	unsigned int	flush_cache_cnt;
+	unsigned int	cache_on_cnt;
+	unsigned int	cache_off_cnt;
+	unsigned int	pwr_on_cnt;
+	unsigned int	pwr_off_short_cnt;
+	unsigned int	pwr_off_long_cnt;
+	unsigned int	bkops_start_cnt;
+	unsigned int	hpi_cnt;
+	unsigned int	sanitize_cnt;
+	unsigned int	trim_cnt;
+	unsigned int	erase_cnt;
+	unsigned int	discard_cnt;
+	unsigned int	boot_wp_cnt;
+	unsigned int	part_cfg_cnt;
+	unsigned int	pwr_cls_cnt;
+	unsigned int	bus_width_cnt;
+	unsigned int	hs_timing_cnt;
+	unsigned int	erase_grp_def_cnt;
+	unsigned int	hpi_mgmt_cnt;
+	unsigned int	exp_events_ctrl_cnt;
+	unsigned int	cmd38_trim_cnt;
+	unsigned int	cmd38_erase_cnt;
+	unsigned int	cmd38_sectrim1_cnt;
+	unsigned int	cmd38_secerase_cnt;
+	unsigned int	cmd38_sectrim2_cnt;
+	unsigned int	bkops_en_cnt;
+	struct alarm	mmc_alarm;
+	struct delayed_work	alarm_work;
+	struct delayed_work	test_work;
+};
+//ASUS_BSP --- lei_guo "mmc cmd statistics"
+
 /*
  * MMC device
  */
@@ -393,6 +445,19 @@ struct mmc_card {
 
 	struct device_attribute rpm_attrib;
 	unsigned int		idle_timeout;
+//ASUS_BSP +++ lei_guo "emmc info for ATD"
+	bool has_hynix_dbgcmd;
+	char mmc_info[25];
+	char mmc_total_size[10];
+//ASUS_BSP --- lei_guo "emmc info for ATD"
+//ASUS_BSP +++ lei_guo "mmc suspend stress test"
+#ifdef CONFIG_MMC_SUSPENDTEST
+	unsigned int    sectors_changed;
+#endif
+//ASUS_BSP --- lei_guo "mmc suspend stress test"
+//ASUS_BSP +++ lei_guo "mmc cmd statistics"
+	struct mmc_cmd_stats *cmd_stats;
+//ASUS_BSP --- lei_guo "mmc cmd statistics"
 	struct notifier_block        reboot_notify;
 	bool issue_long_pon;
 	u8 *cached_ext_csd;
@@ -536,7 +601,13 @@ static inline void __maybe_unused remove_quirk(struct mmc_card *card, int data)
 #define mmc_card_ext_capacity(c) ((c)->state & MMC_CARD_SDXC)
 #define mmc_card_removed(c)	((c) && ((c)->state & MMC_CARD_REMOVED))
 #define mmc_card_doing_bkops(c)	((c)->state & MMC_STATE_DOING_BKOPS)
+//ASUS_BSP +++ lei_guo "mmc bkops stress test"
+#ifdef CONFIG_MMC_BKOPS_TEST
+#define mmc_card_need_bkops(c)	((c)->host->bkopstest)? 1: ((c)->state & MMC_STATE_NEED_BKOPS)
+#else
 #define mmc_card_need_bkops(c)	((c)->state & MMC_STATE_NEED_BKOPS)
+#endif
+//ASUS_BSP --- lei_guo "mmc bkops stress test"
 
 #define mmc_card_set_present(c)	((c)->state |= MMC_STATE_PRESENT)
 #define mmc_card_set_readonly(c) ((c)->state |= MMC_STATE_READONLY)

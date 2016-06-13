@@ -2891,6 +2891,7 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 	msm_host->mmc->caps2 |= MMC_CAP2_STOP_REQUEST;
 	msm_host->mmc->caps2 |= MMC_CAP2_ASYNC_SDIO_IRQ_4BIT_MODE;
 	msm_host->mmc->caps2 |= MMC_CAP2_CORE_PM;
+	msm_host->mmc->caps2 |= MMC_CAP2_INIT_BKOPS;  //ASUS_BSP+++ lei_guo "enable BKOPS by default"
 	msm_host->mmc->pm_caps |= MMC_PM_KEEP_POWER;
 
 	if (msm_host->pdata->nonremovable)
@@ -3064,8 +3065,14 @@ static int sdhci_msm_suspend(struct device *dev)
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
 	int ret = 0;
 
-	if (gpio_is_valid(msm_host->pdata->status_gpio))
-		mmc_cd_gpio_free(msm_host->mmc);
+	pr_debug("%s: %s()\n", mmc_hostname(host->mmc), __func__);
+
+	if (gpio_is_valid(msm_host->pdata->status_gpio)) {
+//ASUS_BSP +++ Allen_Zhuang "enable card detect irq as wakeup source"
+//		mmc_cd_gpio_free(msm_host->mmc);
+		enable_irq_wake(host->mmc->hotplug.irq);
+//ASUS_BSP --- Allen_Zhuang "enable card detect irq as wakeup source"
+	}
 
 	if (pm_runtime_suspended(dev)) {
 		pr_debug("%s: %s: already runtime suspended\n",
@@ -3085,12 +3092,19 @@ static int sdhci_msm_resume(struct device *dev)
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
 	int ret = 0;
 
+	pr_debug("%s: %s()\n", mmc_hostname(host->mmc), __func__);
+
 	if (gpio_is_valid(msm_host->pdata->status_gpio)) {
+//ASUS_BSP +++ Allen_Zhuang "enable card detect irq as wakeup source"
+		disable_irq_wake(host->mmc->hotplug.irq);
+#if 0
 		ret = mmc_cd_gpio_request(msm_host->mmc,
 				msm_host->pdata->status_gpio);
 		if (ret)
 			pr_err("%s: %s: Failed to request card detection IRQ %d\n",
 					mmc_hostname(host->mmc), __func__, ret);
+#endif
+//ASUS_BSP --- Allen_Zhuang "enable card detect irq as wakeup source"
 	}
 
 	if (pm_runtime_suspended(dev)) {

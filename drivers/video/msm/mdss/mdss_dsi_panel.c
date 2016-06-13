@@ -23,6 +23,9 @@
 #include <linux/err.h>
 
 #include "mdss_dsi.h"
+#include "mdss_debug.h"
+#include "mdss_asus_debug.h"
+
 
 #define DT_CMD_HDR 6
 
@@ -82,11 +85,21 @@ static void mdss_dsi_panel_bklt_pwm(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 }
 
 static char dcs_cmd[2] = {0x54, 0x00}; /* DTYPE_DCS_READ */
+
+#if defined(ASUS_A500KL_PROJECT)
+
+static struct dsi_cmd_desc dcs_read_cmd = {
+	{DTYPE_GEN_READ, 1, 0, 1, 5, sizeof(dcs_cmd)},
+	dcs_cmd
+};
+#else
+
 static struct dsi_cmd_desc dcs_read_cmd = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(dcs_cmd)},
 	dcs_cmd
 };
 
+#endif
 u32 mdss_dsi_panel_cmd_read(struct mdss_dsi_ctrl_pdata *ctrl, char cmd0,
 		char cmd1, void (*fxn)(int), char *rbuf, int len)
 {
@@ -182,6 +195,10 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
 
 	if (enable) {
+#ifdef ASUS_A500KL_PROJECT
+		gpio_set_value(15, 1);
+#endif
+
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
 
@@ -317,6 +334,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
+
 	mipi  = &pdata->panel_info.mipi;
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);

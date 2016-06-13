@@ -29,9 +29,31 @@
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 #include <linux/spinlock.h>
+//ASUSDEBUG + jeffery_hu@asus.com
+struct kobject *kobj;//ASUS_BSP + [thomas]Send uevent to userspace
+//ASUSDEBUG -
+
+//ASUS BSP Freeman +++ for SMMI test
+#include <asm/uaccess.h>
+#include <linux/of_irq.h>
+static struct input_dev *g_input_dev;
+#define POWER_KEY_TEST 30
+static int vol_up_gpio;
+static int vol_down_gpio;
+static int pwr_gpio;
+//ASUS BSP Freeman --- for SMMI test
+
+//ASUS BSP Freeman +++ add volup/voldown function in phone call suspend
+extern int g_flag_csvoice_fe_connected;
+extern int FMStatus;
+static bool phone_call_suspend = false;
+//ASUS BSP Freeman ---
+
+static int g_keycheck_abort = 0; //ASUS BSP Freeman fix Power key suspend/resume fail
+static int g_doublevaluekeyforcamera = 0;
 
 struct gpio_button_data {
-	const struct gpio_keys_button *button;
+	struct gpio_keys_button *button; //ASUS BSP Freeman +++ remove const
 	struct input_dev *input;
 	struct timer_list timer;
 	struct work_struct work;
@@ -48,9 +70,119 @@ struct gpio_keys_drvdata {
 	unsigned int n_buttons;
 	int (*enable)(struct device *dev);
 	void (*disable)(struct device *dev);
-	struct gpio_button_data data[0];
+	struct gpio_button_data data[3]; //ASUS BSP Freeman +++ change data[0]-> data[3]
 };
+//ASUSDEBUG + jeffery_hu@asus.com
+//for debug slow
+//#include "../../../sound/soc/codecs/wcd9310.h"
+static  struct work_struct __wait_for_two_keys_work;
+static  struct work_struct __wait_for_slowlog_work;
+extern int boot_after_60sec;
+void wait_for_slowlog_work(struct work_struct *work)
+{
+    static int one_slowlog_instance_running = 0;
+    int i, j, volume_up_key, power_key;	
+    
+    volume_up_key = vol_up_gpio;
+    power_key = pwr_gpio;
+    j = 30;
+    pr_debug("%s()++\n", __func__);
+    if(!one_slowlog_instance_running)
+    { 
+        if(gpio_get_value_cansleep(power_key) != 0)
+        {
+            return;
+        }
+        one_slowlog_instance_running = 1;
 
+        for(i = 0; i < j; i++)
+        {
+            if( gpio_get_value_cansleep(power_key) == 0)   
+            {
+                msleep(100);
+            }         
+            else
+                break;
+        }
+        if(i == j)
+        {
+            printk("start to gi chk in %s()\n", __func__);
+            save_all_thread_info();
+				
+            msleep(1 * 1000);
+				
+            printk("start to gi delta in %s()\n", __func__);
+            delta_all_thread_info();
+            
+            printk("start to save mem info in %s()\n", __func__);
+            asus_show_mem();
+            
+            save_phone_hang_log();
+            //Dump_wcd9310_reg();     //Bruno++    
+            //printk_lcd("slow log captured\n");
+        }			
+        one_slowlog_instance_running = 0;
+    }       
+}
+
+void wait_for_two_keys_work(struct work_struct *work)
+{
+    static int one_instance_running = 0;
+    int i, volume_up_key, volume_down_key, power_key;
+
+    volume_up_key = vol_up_gpio;
+    volume_down_key = vol_down_gpio;
+    power_key = pwr_gpio;
+
+    pr_debug("%s()++\n", __func__);
+    if(!one_instance_running)
+    { 
+        if(gpio_get_value_cansleep(power_key) != 0 || gpio_get_value_cansleep(volume_up_key) != 0 || gpio_get_value_cansleep(volume_down_key) != 0)
+        {
+            pr_debug("wait_for_two_keys_work one of the keys is not pressed wait_for_two_keys_work--\n");
+            return;
+        }
+        one_instance_running = 1;
+        
+        for(i = 0; i < 20; i++)
+        {
+            if(gpio_get_value_cansleep(volume_up_key) == 0 && gpio_get_value_cansleep(volume_down_key) == 0 && gpio_get_value_cansleep(power_key) == 0 )   
+            {
+                msleep(100);
+            }         
+            else
+                break;
+        }
+        if(i == 20)
+        {
+            printk("start to gi chk in %s()\n", __func__);
+            save_all_thread_info();
+            
+            msleep(5 * 1000);
+            
+            printk("start to gi delta in %s()\n", __func__);
+            delta_all_thread_info();
+            
+            printk("start to save mem info in %s()\n", __func__);
+            asus_show_mem();
+            
+            save_phone_hang_log();
+            //Dump_wcd9310_reg();     //Bruno++    
+            //printk_lcd("slow log captured\n");
+        }
+        else
+        {
+            pr_info("wait_for_two_keys_work one of the keys is not pressed\n");
+        }
+        one_instance_running = 0;
+    }
+    //else
+    //    printk("wait_for_two_keys_work already running\n");
+    //printk("wait_for_two_keys_work--\n");
+            
+    
+}
+//ASUSDEBUG -
 /*
  * SYSFS interface for enabling/disabling keys and switches:
  *
@@ -270,6 +402,12 @@ ATTR_SHOW_FN(switches, EV_SW, false);
 ATTR_SHOW_FN(disabled_keys, EV_KEY, true);
 ATTR_SHOW_FN(disabled_switches, EV_SW, true);
 
+static ssize_t gpio_keys_show_doublevaluekeyforcamera(struct device *dev,struct device_attribute *attr,char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%u\n", g_doublevaluekeyforcamera);
+}
+
+
 /*
  * ATTRIBUTES:
  *
@@ -299,6 +437,17 @@ static ssize_t gpio_keys_store_##name(struct device *dev,		\
 ATTR_STORE_FN(disabled_keys, EV_KEY);
 ATTR_STORE_FN(disabled_switches, EV_SW);
 
+static ssize_t gpio_keys_store_doublevaluekeyforcamera(struct device *dev,struct device_attribute *attr,const char *buf,size_t count)
+{
+	int double_valuekey = 0;
+	double_valuekey = buf[0];
+	if(double_valuekey == '1')
+		g_doublevaluekeyforcamera = 1;
+	else
+		g_doublevaluekeyforcamera = 0;
+	return count;
+}
+
 /*
  * ATTRIBUTES:
  *
@@ -312,25 +461,107 @@ static DEVICE_ATTR(disabled_switches, S_IWUSR | S_IRUGO,
 		   gpio_keys_show_disabled_switches,
 		   gpio_keys_store_disabled_switches);
 
+static DEVICE_ATTR(doublevaluekeyforcamera, S_IWUSR | S_IRUGO,
+		   gpio_keys_show_doublevaluekeyforcamera,
+		   gpio_keys_store_doublevaluekeyforcamera);
+
 static struct attribute *gpio_keys_attrs[] = {
 	&dev_attr_keys.attr,
 	&dev_attr_switches.attr,
 	&dev_attr_disabled_keys.attr,
 	&dev_attr_disabled_switches.attr,
+	&dev_attr_doublevaluekeyforcamera.attr,
 	NULL,
 };
 
 static struct attribute_group gpio_keys_attr_group = {
 	.attrs = gpio_keys_attrs,
 };
+//ASUSDEBUG + jeffery_hu@asus.com
+static unsigned int count_start = 0;  
+static unsigned int count = 0;  
+extern void set_dload_mode(int on);
+extern void resetdevice(void);
+#include <linux/reboot.h>
+#include <asm/cacheflush.h>
+#include <linux/asus_global.h>
+extern struct _asus_global asus_global;
+int volumedownkeystatus;//ASUS_BSP + [thomas] Add more check about volume down key
 
+int bootupcount = 0;
+//ASUSDEBUG -
 static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 {
 	const struct gpio_keys_button *button = bdata->button;
 	struct input_dev *input = bdata->input;
 	unsigned int type = button->type ?: EV_KEY;
 	int state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
-
+//ASUSDEBUG + jeffery_hu@asus.com
+   	int volume_up_key, volume_down_key;
+   	int volume_down_key_status_change_from_press = 0;//ASUS_BSP + [thomas] Add more check about volume down key
+	char *envp[3];//ASUS_BSP + [thomas]Send uevent to userspace
+	volume_up_key = vol_up_gpio;
+	volume_down_key = vol_down_gpio;
+	printk("%s:key code=%d  state=%s \n",__func__,
+		button->code,state ? "press" : "release");  //ASUS BSP austin+
+	//printk("GPIO_%d=%d , GPIO_%d=%d , GPIO_%d=%d\n", vol_up_gpio, gpio_get_value_cansleep(vol_up_gpio), vol_down_gpio, gpio_get_value_cansleep(vol_down_gpio), pwr_gpio, gpio_get_value_cansleep(pwr_gpio));
+	//ASUS_BSP +++ [thomas]Send uevent to userspace
+	envp[0] = "top_event";
+	envp[1] = NULL;
+	if (bootupcount == 10 && 
+		(gpio_get_value_cansleep(volume_down_key) == 0) && 
+		(gpio_get_value_cansleep(volume_up_key) == 0) &&
+		(kobj != NULL))
+		kobject_uevent_env(kobj,KOBJ_ONLINE,envp);
+	if (bootupcount < 10)
+		bootupcount++;
+	//ASUS_BSP --- [thomas]Send uevent to userspace
+	if (gpio_get_value_cansleep(volume_up_key) == 0){
+		count_start = 1;
+	}
+	else{
+		count_start = 0;
+	}
+	//ASUS_BSP +++ [thomas] Add more check about volume down key
+	if (gpio_get_value_cansleep(volume_down_key) == 0)
+	{
+		if (volumedownkeystatus)
+		{
+			volumedownkeystatus = 0;
+		}
+	}
+	else
+	{
+		if (!volumedownkeystatus)
+		{
+			volumedownkeystatus = 1;
+			volume_down_key_status_change_from_press = 1;
+		}
+	}
+	//ASUS_BSP --- [thomas] Add more check about volume down key
+	if (count_start)
+	{
+		if (volume_down_key_status_change_from_press)	//ASUS_BSP + [thomas] Add more check about volume down key
+		{
+			count++;
+			if (count == 10)
+			{
+				printk("Kernel alive...\r\n");
+				
+				set_dload_mode(0);
+				asus_global.ramdump_enable_magic = 0;
+				printk(KERN_CRIT "asus_global.ramdump_enable_magic = 0x%x\n",asus_global.ramdump_enable_magic);
+				flush_cache_all();	
+				//reset device	
+				resetdevice();				
+			}		
+		}
+	}
+	else
+	{
+		count = 0;
+	}
+//ASUSDEBUG -
 	if (type == EV_ABS) {
 		if (state)
 			input_event(input, type, button->code, button->value);
@@ -344,7 +575,12 @@ static void gpio_keys_gpio_work_func(struct work_struct *work)
 {
 	struct gpio_button_data *bdata =
 		container_of(work, struct gpio_button_data, work);
-
+	//ASUSDEBUG + jeffery_hu@asus.com
+    //added for slow log
+    schedule_work(&__wait_for_two_keys_work);
+    if (boot_after_60sec)
+		schedule_work(&__wait_for_slowlog_work);
+	//ASUSDEBUG -
 	gpio_keys_gpio_report_event(bdata);
 }
 
@@ -355,11 +591,461 @@ static void gpio_keys_gpio_timer(unsigned long _data)
 	schedule_work(&bdata->work);
 }
 
+//ASUS_BSP +++ jojo_zhou "Fast boot mode"
+#ifdef CONFIG_FASTBOOT
+#include <linux/fastboot.h>
+#include <linux/wakelock.h>
+//#include <linux/spinlock.h>
+//#include <linux/mutex.h>
+static DEFINE_SPINLOCK(handler_lock);
+
+enum PWR_KEY_STATE
+{
+    PWR_KEY_STATE_NOT_HANDLED_YET = 0,
+    PWR_KEY_STATE_WAITTING_FOR_DEBUNCING_TIMEOUT,
+    PWR_KEY_STATE_WAITING_FOR_KEY_RELEASE,
+    PWR_KEY_STATE_COUNT,
+};
+enum PWR_KEY_DEBOUNCING_LEVEL
+{
+    PWR_KEY_DEBOUNCING_LEVEL_NO = 0,
+    PWR_KEY_DEBOUNCING_LEVEL_SHORT,
+    PWR_KEY_DEBOUNCING_LEVEL_LONG,
+    PWR_KEY_DEBOUNCING_LEVEL_COUNT,
+};
+struct power_key_context{
+    void(*transit)(struct power_key_context * context, enum PWR_KEY_STATE  newstate);
+    void(*startDebouncing)(struct power_key_context * context, enum PWR_KEY_DEBOUNCING_LEVEL level);
+    void(*stopDebouncing)(struct power_key_context * context);
+    bool(*isDebouncing)(struct power_key_context * context);
+    void (*reportKey)(struct power_key_context * context, bool keyPressed);
+};
+struct power_key_state {
+    enum PWR_KEY_STATE state;
+    const char *name;
+    struct power_key_context *context;
+    void (*onPressed)(struct power_key_state *state);
+    void (*onReleased)(struct power_key_state *state);
+    void (*onDebouncingTimeout)(struct power_key_state *state);
+    void (*setContext)(struct power_key_state *state, struct power_key_context *context);
+};
+//the member functions of power_key_state
+static void power_key_state_setContext(struct power_key_state *this ,struct power_key_context *context)
+{
+    BUG_ON(this == NULL);
+
+    this->context = context;
+}
+//the member functions of not_handled_yet_state
+static void not_handled_yet_state_onPressed(struct power_key_state *this)
+{
+    BUG_ON(this == NULL);
+
+    pr_debug("not_handled_yet_state_onPressed+++\n");
+
+    if(this->context->isDebouncing(this->context)){
+
+        return;
+    }
+
+    if(is_fastboot_enable()){
+
+        this->context->startDebouncing(this->context, PWR_KEY_DEBOUNCING_LEVEL_LONG);
+
+    }else{
+
+        this->context->startDebouncing(this->context,PWR_KEY_DEBOUNCING_LEVEL_SHORT);//todo :should be defined in boardxxx.c
+
+    }
+
+    this->context->transit(this->context, PWR_KEY_STATE_WAITTING_FOR_DEBUNCING_TIMEOUT);
+
+}
+static void not_handled_yet_state_onReleased(struct power_key_state *this)
+{
+    return;
+/*
+    if(this->context->isDebouncing(this->context)){
+
+        return;
+    }
+
+    //this->context->stopDebouncing(this->context);
+
+    this->context->reportKey(this->context, false);
+*/
+}
+static void not_handled_yet_state_onDebouncingTimeout(struct power_key_state *this)
+{
+    return;
+/*
+    if(is_power_key_pressed()){
+
+        this->context->reportKey(this->context,true);
+
+    }
+    */
+}
+//the member functions of waiting_for_debuncing_timeout_state
+static void waiting_for_debuncing_timeout_state_onPressed(struct power_key_state *this)
+{
+    BUG_ON(this == NULL);
+
+    //just ignore it...
+}
+static void waiting_for_debuncing_timeout_state_onReleased(struct power_key_state *this)
+{
+    this->context->stopDebouncing(this->context);
+
+    this->context->transit(this->context, PWR_KEY_STATE_NOT_HANDLED_YET);
+
+}
+static void waiting_for_debuncing_timeout_state_onDebouncingTimeout(struct power_key_state *this)
+{
+    this->context->reportKey(this->context,true);
+
+    ready_to_wake_up_in_fastboot();
+
+    this->context->transit(this->context, PWR_KEY_STATE_WAITING_FOR_KEY_RELEASE);
+}
+//the member functions of waiting_for_key_release_state
+static void waiting_for_key_release_state_onPressed(struct power_key_state *this)
+{
+    BUG_ON(this == NULL);
+
+    //just ignore it...
+}
+static void waiting_for_key_release_state_onReleased(struct power_key_state *this)
+{
+    this->context->reportKey(this->context,false);
+
+    this->context->transit(this->context, PWR_KEY_STATE_NOT_HANDLED_YET);
+
+}
+static void waiting_for_key_release_state_onDebouncingTimeout(struct power_key_state *this)
+{
+    BUG_ON(this == NULL);
+
+    //just ignore it...
+}
+struct power_key_handler {
+    bool isInited;
+    int debounce_interval_in_normal_mode;
+    int keyCode;
+    struct power_key_state *stateList;
+    enum PWR_KEY_STATE currentState;
+    struct timer_list timer; // for handle timeout...
+    struct mutex lock;
+    struct power_key_context context;
+    struct wake_lock release_wake_lock;
+    void (*init)(struct power_key_handler  *handler, int debounce_interval_in_normal_mode);
+    void (*deInit)(struct power_key_handler  *handler);
+    void (*handle)(struct power_key_handler  *handler,int key_pressed);
+    void (*time_expired)(unsigned long _data);
+};
+//the member functions of power_key_handler
+static void power_key_handler_transit(struct power_key_context * context, enum PWR_KEY_STATE  newstate)
+{
+//    BUG_ON(NULL == context);
+
+    struct power_key_handler  *this=
+        container_of(context, struct power_key_handler, context);
+
+    pr_debug("power_key_handler transit...\n");
+
+    BUG_ON(this->currentState == newstate);
+
+    pr_debug("old state:%s\n",this->stateList[this->currentState].name);
+
+    this->currentState = newstate;
+
+    pr_debug("new state:%s\n",this->stateList[this->currentState].name);
+
+}
+static void power_key_handler_startDebouncing(struct power_key_context * context, enum PWR_KEY_DEBOUNCING_LEVEL level)
+{
+   // BUG_ON(NULL == context);
+
+    struct power_key_handler  *this=
+        container_of(context, struct power_key_handler, context);
+
+    int expires;
+
+    //mutex_lock(&this->lock);
+    switch(level){
+
+        case PWR_KEY_DEBOUNCING_LEVEL_LONG:
+            expires =    TIME_FOR_POWERKEY_LONGPRESS;
+            break;
+        case PWR_KEY_DEBOUNCING_LEVEL_NO:
+        case PWR_KEY_DEBOUNCING_LEVEL_SHORT:
+        default:
+            expires = this->debounce_interval_in_normal_mode;
+            break;
+    }
+
+    pr_debug("power_key_handler startDebouncing %d msec\n",expires);
+
+    if (!timer_pending(&this->timer))
+		mod_timer(&this->timer, jiffies + msecs_to_jiffies(expires));
+
+    //mutex_unlock(&this->lock);
+}
+static void power_key_handler_stopDebouncing(struct power_key_context * context)
+{
+    //BUG_ON(NULL == context);
+
+    struct power_key_handler  *this=
+        container_of(context, struct power_key_handler, context);
+
+    //mutex_lock(&this->lock);
+    pr_debug("power_key_handler stopDebouncing\n");
+
+    if (timer_pending(&this->timer))
+		del_timer(&this->timer);
+
+    //mutex_unlock(&this->lock);
+
+}
+
+static bool power_key_handler_isDebouncing(struct power_key_context * context)
+{
+    //BUG_ON(NULL == context);
+
+    struct power_key_handler  *this=
+        container_of(context, struct power_key_handler, context);
+
+    return (timer_pending(&this->timer));
+}
+//the power key and P01 power key will be translated to the same keycode for framework,....so just send power key event ....
+//public for all state to use.
+static void power_key_handler_reportKey(struct power_key_context * context, bool keyPressed)
+{
+    struct power_key_handler  *this=
+        container_of(context, struct power_key_handler, context);
+
+    printk("power keys state=%s,%d\n", keyPressed ? "press" : "release",this->currentState);
+
+    input_event(g_input_dev, EV_KEY, KEY_POWER, (int)keyPressed);
+    input_sync(g_input_dev);
+}
+void send_fake_power_key_event(bool keyPressed)
+{
+    input_event(g_input_dev, EV_KEY, KEY_POWER, (int)keyPressed);
+    input_sync(g_input_dev);
+}
+static void power_key_handler_time_expired(unsigned long _data)
+{
+    unsigned long flags;
+
+    struct power_key_handler *this = (struct power_key_handler *)_data;
+
+    spin_lock_irqsave(&handler_lock, flags);
+
+    pr_debug("power_key_handler Debouncing timeout\n");
+
+    this->stateList[this->currentState].onDebouncingTimeout(&this->stateList[this->currentState]);
+
+    spin_unlock_irqrestore(&handler_lock, flags);
+
+}
+static void power_key_handler_init(struct power_key_handler  *this, int debounce_interval_in_normal_mode)
+{
+    unsigned long flags;
+
+    BUG_ON(this == NULL);
+
+    BUG_ON(this->isInited == true);
+
+    spin_lock_irqsave(&handler_lock, flags);
+
+    //[+++] This is a workaround to make sure PWR key sent
+//  wake_lock_init(&pwr_key_wake_lock, WAKE_LOCK_SUSPEND, "pwr_key_temp");
+//  printk(KERN_INFO "[PM]Initialize a wakelock of PWR key\r\n");
+    //[---] This is a workaround to make sure PWR key sent
+
+    if(false == this->isInited){
+
+        enum PWR_KEY_STATE state_index;
+
+        this->currentState = PWR_KEY_STATE_NOT_HANDLED_YET;
+
+        for(state_index = PWR_KEY_STATE_NOT_HANDLED_YET; state_index < PWR_KEY_STATE_COUNT ; state_index++){
+
+                this->stateList[state_index].setContext(&this->stateList[state_index], &this->context);
+        }
+
+        wake_lock_init(&this->release_wake_lock, WAKE_LOCK_SUSPEND, "power_key_press");
+
+        //mutex_init(&this->timer_lock);
+
+        setup_timer(&this->timer, this->time_expired, (unsigned long)this);
+
+        this->debounce_interval_in_normal_mode = debounce_interval_in_normal_mode;
+
+        this->isInited = true;
+    }
+
+    spin_unlock_irqrestore(&handler_lock, flags);
+}
+static void power_key_handler_deInit(struct power_key_handler  *this)
+{
+    BUG_ON(this == NULL);
+
+    BUG_ON(this->isInited == false);
+
+    if(true == this->isInited){
+
+        del_timer_sync(&this->timer);
+
+        this->isInited = false;
+
+    }
+
+}
+static void power_key_handler_handle(struct power_key_handler  *this,int key_pressed)
+{
+    unsigned long flags;
+
+    spin_lock_irqsave(&handler_lock, flags);
+
+    BUG_ON(this == NULL);
+
+    BUG_ON(this->isInited == false);
+
+    pr_debug("power_key_handler handle+++, now state:%d\n",this->currentState);
+
+    if(key_pressed){
+
+        this->stateList[this->currentState].onPressed(&this->stateList[this->currentState]);
+
+        if(!wake_lock_active(&this->release_wake_lock)){
+
+            wake_lock(&this->release_wake_lock);
+
+        }
+
+        pr_debug(KERN_INFO "[PM]power key release wakelock, to prevent entering suspend\r\n");
+
+    }else{
+
+        this->stateList[this->currentState].onReleased(&this->stateList[this->currentState]);
+
+        if(wake_lock_active(&this->release_wake_lock)){
+
+            wake_unlock(&this->release_wake_lock);
+
+        }
+
+        pr_debug(KERN_INFO "[PM]power key wakelock release\r\n");
+
+    }
+
+    spin_unlock_irqrestore(&handler_lock, flags);
+
+}
+static struct power_key_state a6x_power_key_state[PWR_KEY_STATE_COUNT] = {
+    {
+        .state           = PWR_KEY_STATE_NOT_HANDLED_YET,
+        .name           = "not_handled_yet_state",
+        .context         = NULL,
+        .onPressed           = not_handled_yet_state_onPressed,
+        .onReleased     = not_handled_yet_state_onReleased,
+        .onDebouncingTimeout = not_handled_yet_state_onDebouncingTimeout,
+        .setContext = power_key_state_setContext,
+},
+{
+        .state           = PWR_KEY_STATE_WAITTING_FOR_DEBUNCING_TIMEOUT,
+        .name           = "waiting_for_debuncing_timeout_state",
+        .context         = NULL,
+        .onPressed           = waiting_for_debuncing_timeout_state_onPressed,
+        .onReleased     = waiting_for_debuncing_timeout_state_onReleased,
+        .onDebouncingTimeout = waiting_for_debuncing_timeout_state_onDebouncingTimeout,
+        .setContext = power_key_state_setContext,
+},
+ {
+        .state           = PWR_KEY_STATE_WAITING_FOR_KEY_RELEASE,
+        .name           = "waiting_for_key_release_state",
+        .context         = NULL,
+        .onPressed           = waiting_for_key_release_state_onPressed,
+        .onReleased     = waiting_for_key_release_state_onReleased,
+        .onDebouncingTimeout = waiting_for_key_release_state_onDebouncingTimeout,
+        .setContext = power_key_state_setContext,
+},
+};
+
+static struct power_key_handler g_power_key_handler = {
+    .isInited = false,
+    .keyCode = KEY_POWER,
+    .stateList =a6x_power_key_state,
+    .currentState = PWR_KEY_STATE_NOT_HANDLED_YET,
+    .context = {
+        .transit = power_key_handler_transit,
+        .startDebouncing = power_key_handler_startDebouncing,
+        .stopDebouncing = power_key_handler_stopDebouncing,
+        .isDebouncing = power_key_handler_isDebouncing,
+        .reportKey =power_key_handler_reportKey,
+    },
+    .init = power_key_handler_init,
+    .deInit = power_key_handler_deInit,
+    .handle = power_key_handler_handle,
+    .time_expired = power_key_handler_time_expired,
+};
+bool isPowerKeyHandled(bool pressed)
+{
+    static bool is_power_key_handling_by_fastboot = false;
+
+    printk("power_key_isr,state=%s\n",pressed ? "press" : "release");
+
+    if(pressed){//press
+
+        if(is_fastboot_enable()){
+
+            g_power_key_handler.handle(&g_power_key_handler, pressed);
+
+            is_power_key_handling_by_fastboot = true;
+
+            return true;
+
+        }
+
+    }else if(true == is_power_key_handling_by_fastboot){//release
+
+            g_power_key_handler.handle(&g_power_key_handler, pressed);
+
+            is_power_key_handling_by_fastboot = false;
+
+            return true;
+    }
+
+    return false;
+
+}
+#endif //#ifdef CONFIG_FASTBOOT
+//ASUS_BSP --- jojo_zhou "For fastboot mode"
+
 static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
 {
 	struct gpio_button_data *bdata = dev_id;
 
+//ASUS_BSP +++ jojo_zhou "Fast boot mode"
+#ifdef CONFIG_FASTBOOT
+	struct gpio_keys_button *button = bdata->button;
+
+	//ignore all key code when in fastboot mode except power key
+	if(button->code ==KEY_POWER ){
+
+		int state = (gpio_get_value(button->gpio) ? 1 : 0) ^ button->active_low;
+
+		if(isPowerKeyHandled(state)){
+			return IRQ_HANDLED;
+		}
+	}
+#endif //#ifdef CONFIG_FASTBOOT
+//ASUS_BSP --- jojo_zhou "For fastboot mode"
+
 	BUG_ON(irq != bdata->irq);
+	g_keycheck_abort = 1; //ASUS BSP Freeman+++ fix Power key suspend/resume fail
 
 	if (bdata->timer_debounce)
 		mod_timer(&bdata->timer,
@@ -420,7 +1106,7 @@ out:
 static int __devinit gpio_keys_setup_key(struct platform_device *pdev,
 					 struct input_dev *input,
 					 struct gpio_button_data *bdata,
-					 const struct gpio_keys_button *button)
+					 struct gpio_keys_button *button) //ASUS BSP Freeman +++ remove const
 {
 	const char *desc = button->desc ? button->desc : "gpio_keys";
 	struct device *dev = &pdev->dev;
@@ -519,6 +1205,115 @@ fail:
 
 	return error;
 }
+
+//ASUS BSP Freeman ++++++ for SMMI test
+#ifdef  CONFIG_PROC_FS
+#define debug_GPIO_KEY_PROC_FILE  "driver/A500KL_debug_key"
+static struct proc_dir_entry *debug_key_proc_file;
+
+#include <linux/syscalls.h>
+#include <linux/fs.h>
+#include <linux/file.h>
+static mm_segment_t oldfs;
+static void initKernelEnv(void)
+{
+    oldfs = get_fs();
+	set_fs(KERNEL_DS);
+}
+
+static void deinitKernelEnv(void)
+{
+	set_fs(oldfs);
+}
+
+static ssize_t debug_key_proc_write(struct file *filp, const char *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	struct gpio_keys_drvdata *ddata = input_get_drvdata(g_input_dev);
+	int i;
+
+	memset(messages, 0, sizeof(messages));
+    if (len > 256)
+    {
+        len = 256;
+    }
+	if (copy_from_user(messages, buff, len))
+	{
+		return -EFAULT;
+	}
+
+	initKernelEnv();
+
+	if(strncmp(messages, "1", 1) == 0)
+	{
+		for (i=0;i<3;i++)
+		{
+			if (ddata->data[i].button->gpio  == pwr_gpio)
+				ddata->data[i].button->code = POWER_KEY_TEST;
+			if (ddata->data[i].button->gpio  == vol_up_gpio)
+				ddata->data[i].button->code = KEY_VOLUMEUP;
+			if (ddata->data[i].button->gpio  == vol_down_gpio)
+				ddata->data[i].button->code = KEY_VOLUMEDOWN;
+		}
+		printk("[KeyPad] Debug Mode!!!\n");
+	}
+    else if(strncmp(messages, "0", 1) == 0)
+	{
+		for (i=0;i<3;i++)
+		{
+			if (ddata->data[i].button->gpio  == pwr_gpio)
+				ddata->data[i].button->code = KEY_POWER;
+			if (ddata->data[i].button->gpio  == vol_up_gpio)
+				ddata->data[i].button->code = KEY_VOLUMEUP;
+			if (ddata->data[i].button->gpio  == vol_down_gpio)
+				ddata->data[i].button->code = KEY_VOLUMEDOWN;
+		}
+		printk("[KeyPad] Normal Mode!!!\n");
+	}
+	else if(strncmp(messages, "2", 1) == 0)
+    {
+		for (i=0;i<3;i++)
+		{
+			if (ddata->data[i].button->gpio  == pwr_gpio)
+				ddata->data[i].button->code = KEY_POWER;
+			if (ddata->data[i].button->gpio  == vol_up_gpio)
+				ddata->data[i].button->code = KEY_MENU;
+			if (ddata->data[i].button->gpio  == vol_down_gpio)
+				ddata->data[i].button->code = KEY_BACK;
+		}
+		printk("[KeyPad] BACK/MENU Mode!!!\n");
+	}
+
+    for (i=0;i<3;i++)
+    {
+       printk("code[%d] is GPIO %d \n", ddata->data[i].button->code, ddata->data[i].button->gpio);
+    }
+
+    deinitKernelEnv();
+     return len;
+}
+
+static struct file_operations debug_key_proc_ops = {
+	.write = debug_key_proc_write,
+};
+
+static void create_debug_key_proc_file(void)
+{
+	printk("[KeyPad] create_debug_key_proc_file\n");
+	debug_key_proc_file = create_proc_entry(debug_GPIO_KEY_PROC_FILE, 0666, NULL);
+	if (debug_key_proc_file) {
+		debug_key_proc_file->proc_fops = &debug_key_proc_ops;
+	}
+}
+
+static void remove_debug_key_proc_file(void)
+{
+   extern struct proc_dir_entry proc_root;
+   printk("[KeyPad] remove_debug_key_proc_file\n");
+   remove_proc_entry(debug_GPIO_KEY_PROC_FILE, &proc_root);
+}
+#endif
+//ASUS BSP Freeman ------ for SMMI test
 
 static int gpio_keys_open(struct input_dev *input)
 {
@@ -647,14 +1442,22 @@ static void gpio_remove_key(struct gpio_button_data *bdata)
 
 static int __devinit gpio_keys_probe(struct platform_device *pdev)
 {
-	const struct gpio_keys_platform_data *pdata = pdev->dev.platform_data;
+	struct gpio_keys_platform_data *pdata = pdev->dev.platform_data; //ASUS BSP Freeman +++ remove const
 	struct gpio_keys_drvdata *ddata;
 	struct device *dev = &pdev->dev;
 	struct gpio_keys_platform_data alt_pdata;
 	struct input_dev *input;
 	int i, error;
 	int wakeup = 0;
-
+	//ASUSDEBUG + jeffery_hu@asus.com
+	int volume_down_key = vol_down_gpio;//ASUS_BSP + [thomas] Add more check about volume down key
+    //add for debug slow
+    INIT_WORK(&__wait_for_two_keys_work, wait_for_two_keys_work);
+    INIT_WORK(&__wait_for_slowlog_work, wait_for_slowlog_work);
+    //ASUSDEBUG -
+	//ASUSDEBUG + jeffery_hu@asus.com
+	volumedownkeystatus = gpio_get_value_cansleep(volume_down_key);//0>press 1>release//ASUS_BSP + [thomas] Add more check about volume down key
+	//ASUSDEBUG -
 	if (!pdata) {
 		error = gpio_keys_get_devtree_pdata(dev, &alt_pdata);
 		if (error)
@@ -691,13 +1494,14 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 	input->id.vendor = 0x0001;
 	input->id.product = 0x0001;
 	input->id.version = 0x0100;
+	g_input_dev = input;  //ASUS BSP Freeman +++ for SMMI test
 
 	/* Enable auto repeat feature of Linux input subsystem */
 	if (pdata->rep)
 		__set_bit(EV_REP, input->evbit);
 
 	for (i = 0; i < pdata->nbuttons; i++) {
-		const struct gpio_keys_button *button = &pdata->buttons[i];
+		struct gpio_keys_button *button = &pdata->buttons[i]; //ASUS BSP Freeman +++ remover const
 		struct gpio_button_data *bdata = &ddata->data[i];
 
 		error = gpio_keys_setup_key(pdev, input, bdata, button);
@@ -706,6 +1510,16 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 
 		if (button->wakeup)
 			wakeup = 1;
+
+//ASUS_BSP +++ jojo_zhou "Fast boot mode"
+#ifdef CONFIG_FASTBOOT
+             if(button->code == KEY_POWER){
+
+                 g_power_key_handler.init(&g_power_key_handler, button->debounce_interval);
+
+             }
+#endif //#ifdef CONFIG_FASTBOOT
+//ASUS_BSP --- jojo_zhou "For fastboot mode"
 	}
 
 	error = sysfs_create_group(&pdev->dev.kobj, &gpio_keys_attr_group);
@@ -731,6 +1545,18 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 	input_sync(input);
 
 	device_init_wakeup(&pdev->dev, wakeup);
+	//ASUSDEBUG + jeffery_hu@asus.com
+	kobj = &pdev->dev.kobj;//ASUS_BSP + [thomas]Send uevent to userspace
+	//ASUSDEBUG -
+
+//ASUS BSP Freeman +++ for SMMI test
+#ifdef  CONFIG_PROC_FS
+        create_debug_key_proc_file();
+        input_set_capability(input, EV_KEY, KEY_MENU);
+        input_set_capability(input, EV_KEY, KEY_BACK);
+        input_set_capability(input, EV_KEY, POWER_KEY_TEST);
+#endif
+//ASUS BSP Freeman --- for SMMI test
 
 	return 0;
 
@@ -753,6 +1579,11 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 
 static int __devexit gpio_keys_remove(struct platform_device *pdev)
 {
+//ASUS_BSP +++ jojo_zhou "For fastboot mode"
+#ifdef CONFIG_FASTBOOT
+	struct gpio_keys_platform_data *pdata = pdev->dev.platform_data;
+#endif //#ifdef CONFIG_FASTBOOT
+
 	struct gpio_keys_drvdata *ddata = platform_get_drvdata(pdev);
 	struct input_dev *input = ddata->input;
 	int i;
@@ -761,10 +1592,25 @@ static int __devexit gpio_keys_remove(struct platform_device *pdev)
 
 	device_init_wakeup(&pdev->dev, 0);
 
-	for (i = 0; i < ddata->n_buttons; i++)
+	for (i = 0; i < ddata->n_buttons; i++) {
 		gpio_remove_key(&ddata->data[i]);
 
+//ASUS_BSP +++ jojo_zhou "For fastboot mode"
+#ifdef CONFIG_FASTBOOT
+		if( pdata->buttons[i].code == KEY_POWER) {
+			g_power_key_handler.deInit(&g_power_key_handler);
+		}
+#endif //#ifdef CONFIG_FASTBOOT
+//ASUS_BSP --- jojo_zhou "For fastboot mode"
+	}
+
 	input_unregister_device(input);
+
+//ASUS BSP Freeman +++ for SMMI test
+#ifdef  CONFIG_PROC_FS
+    remove_debug_key_proc_file();
+#endif
+//ASUS BSP Freeman --- for SMMI test
 
 	/*
 	 * If we had no platform_data, we allocated buttons dynamically, and
@@ -785,6 +1631,11 @@ static int gpio_keys_suspend(struct device *dev)
 	struct gpio_keys_drvdata *ddata = dev_get_drvdata(dev);
 	int i;
 
+//ASUS BSP Freeman+++ fix Power key suspend/resume fail
+	g_keycheck_abort = 0;
+	printk("[GPIO_KEY] clear g_keycheck_abort = %d\n",g_keycheck_abort);
+//ASUS BSP Freeman--- fix Power key suspend/resume fail
+
 	if (device_may_wakeup(dev)) {
 		for (i = 0; i < ddata->n_buttons; i++) {
 			struct gpio_button_data *bdata = &ddata->data[i];
@@ -792,6 +1643,14 @@ static int gpio_keys_suspend(struct device *dev)
 				enable_irq_wake(bdata->irq);
 		}
 	}
+
+//ASUS BSP Freeman +++ add volup/voldown function in phone call suspend
+	if ( g_flag_csvoice_fe_connected || FMStatus || g_doublevaluekeyforcamera) {
+		enable_irq_wake(gpio_to_irq(vol_up_gpio));
+		enable_irq_wake(gpio_to_irq(vol_down_gpio));
+		phone_call_suspend = true;
+	}
+//ASUS BSP Freeman --- add volup/voldown function in phone call suspend
 
 	return 0;
 }
@@ -809,13 +1668,47 @@ static int gpio_keys_resume(struct device *dev)
 		if (gpio_is_valid(bdata->button->gpio))
 			gpio_keys_gpio_report_event(bdata);
 	}
+
+//ASUS BSP Freeman +++ add volup/voldown function in phone call suspend
+	if ( phone_call_suspend ) {
+		disable_irq_wake(gpio_to_irq(vol_up_gpio));
+		disable_irq_wake(gpio_to_irq(vol_down_gpio));
+		phone_call_suspend = false;
+	}
+//ASUS BSP Freeman --- add volup/voldown function in phone call suspend
+
 	input_sync(ddata->input);
 
 	return 0;
 }
 #endif
 
-static SIMPLE_DEV_PM_OPS(gpio_keys_pm_ops, gpio_keys_suspend, gpio_keys_resume);
+//ASUS BSP Freeman++ fix Power key suspend/resume fail
+static int gpio_keys_suspend_noirq(struct device *dev)
+{
+	if (g_keycheck_abort)
+	{
+		printk("[GPIO_KEY] noirq_check: suspend_abort\n");
+		return -EBUSY;
+	}
+	printk("[GPIO_KEY] in %s\n",__func__);
+	return 0;
+}
+
+static int gpio_keys_resume_noirq(struct device *dev)
+{
+	printk("[GPIO_KEY] in %s\n",__func__);
+	return 0;
+}
+
+static const struct dev_pm_ops gpio_keys_pm_ops = {
+	.suspend	= gpio_keys_suspend,
+	.resume		= gpio_keys_resume,
+	.suspend_noirq  = gpio_keys_suspend_noirq,
+	.resume_noirq   = gpio_keys_resume_noirq,
+};
+//ASUS BSP Freeman--  fix Power key suspend/resume fail
+//static SIMPLE_DEV_PM_OPS(gpio_keys_pm_ops, gpio_keys_suspend, gpio_keys_resume,gpio_keys_suspend_noirq,gpio_keys_resume_noirq);
 
 static struct platform_driver gpio_keys_device_driver = {
 	.probe		= gpio_keys_probe,
@@ -830,6 +1723,11 @@ static struct platform_driver gpio_keys_device_driver = {
 
 static int __init gpio_keys_init(void)
 {
+//ASUSDEBUG + jeffery_hu@asus.com
+	vol_up_gpio = 106;
+	vol_down_gpio = 107;
+	pwr_gpio = 35;
+//ASUSDEBUG -
 	return platform_driver_register(&gpio_keys_device_driver);
 }
 

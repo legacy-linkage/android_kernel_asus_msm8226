@@ -2132,14 +2132,16 @@ retry_allocate:
 			goto err_allocate_fail;
 		}
 	}
-
-	mutex_unlock(&allocation_mutex);
-
-	if (rc == OP_FAIL) {
+	
+    if (rc == OP_FAIL) {
 		inc_ocmem_stat(zone_of(req), NR_ALLOCATION_FAILS);
 		goto err_allocate_fail;
 	}
-
+	//ASUSDEBUG + jeffery_hu@asus.com
+    //move mutex_unlock from above of if(rc==OP_FAIL) to here to prevent from unlocked twice.
+    mutex_unlock(&allocation_mutex);
+    //move mutex_unlock from above of if(rc==OP_FAIL) to here to prevent from unlocked twice.
+    //ASUSDEBUG -
 	if (rc == OP_RESCHED) {
 		buffer->addr = 0x0;
 		buffer->len = 0x0;

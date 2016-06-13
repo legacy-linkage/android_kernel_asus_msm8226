@@ -43,6 +43,8 @@ MODULE_LICENSE("GPL v2");
 MODULE_VERSION("0.2");
 MODULE_ALIAS("platform:i2c_qup");
 
+bool I2C_BUS_SUSPENDING = false;	//ASUS_BSP +++ yan_sun "[A500KL][Sensor][NA][Spec] For I2C suspend/resume issue"
+
 /* QUP Registers */
 enum {
 	QUP_CONFIG              = 0x0,
@@ -1789,8 +1791,10 @@ static int i2c_qup_pm_suspend_sys(struct device *device)
 {
 	struct platform_device *pdev = to_platform_device(device);
 	struct qup_i2c_dev *dev = platform_get_drvdata(pdev);
+	printk("i2c_qup_pm_suspend_sys +++\n");
 	/* Acquire mutex to ensure current transaction is over */
 	mutex_lock(&dev->mlock);
+	I2C_BUS_SUSPENDING = true;	// ASUS_BSP +++ yan_sun "[A500KL][Sensor][NA][Spec] For I2C suspend/resume issue"
 	dev->pwr_state = MSM_I2C_SYS_SUSPENDING;
 	mutex_unlock(&dev->mlock);
 	if (!pm_runtime_enabled(device) || !pm_runtime_suspended(device)) {
@@ -1804,6 +1808,7 @@ static int i2c_qup_pm_suspend_sys(struct device *device)
 		pm_runtime_enable(device);
 	}
 	dev->pwr_state = MSM_I2C_SYS_SUSPENDED;
+	printk("i2c_qup_pm_suspend_sys ---\n");
 	return 0;
 }
 
@@ -1811,13 +1816,16 @@ static int i2c_qup_pm_resume_sys(struct device *device)
 {
 	struct platform_device *pdev = to_platform_device(device);
 	struct qup_i2c_dev *dev = platform_get_drvdata(pdev);
+	printk("i2c_qup_pm_resume_sys +++\n");
 	/*
 	 * Rely on runtime-PM to call resume in case it is enabled
 	 * Even if it's not enabled, rely on 1st client transaction to do
 	 * clock ON and gpio configuration
 	 */
 	dev_dbg(device, "system resume\n");
+	I2C_BUS_SUSPENDING = false;	// ASUS_BSP +++ yan_sun "[A500KL][Sensor][NA][Spec] For I2C suspend/resume issue"
 	dev->pwr_state = MSM_I2C_PM_SUSPENDED;
+	printk("i2c_qup_pm_resume_sys ---\n");
 	return 0;
 }
 #endif /* CONFIG_PM */

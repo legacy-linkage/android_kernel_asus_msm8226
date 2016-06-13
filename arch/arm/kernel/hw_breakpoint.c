@@ -874,8 +874,8 @@ static int debug_reg_trap(struct pt_regs *regs, unsigned int instr)
 {
 	int cpu = smp_processor_id();
 
-	pr_warning("Debug register access (0x%x) caused undefined instruction on CPU %d\n",
-		   instr, cpu);
+	//pr_warning("Debug register access (0x%x) caused undefined instruction on CPU %d\n",
+	//	   instr, cpu);
 
 	/* Set the error flag for this CPU and skip the faulting instruction. */
 	cpumask_set_cpu(cpu, &debug_err_mask);

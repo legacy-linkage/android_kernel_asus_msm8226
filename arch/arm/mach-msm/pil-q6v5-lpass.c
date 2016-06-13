@@ -256,6 +256,7 @@ static void adsp_log_failure_reason(void)
 	memcpy(buffer, reason, size);
 	buffer[size] = '\0';
 	pr_err("ADSP subsystem failure reason: %s", buffer);
+	subsys_save_reason("ADSP", buffer);//ASUS-BBSP Save SSR reason+
 	memset((void *)reason, 0x0, size);
 	wmb();
 }
@@ -271,6 +272,7 @@ static void adsp_fatal_fn(struct work_struct *work)
 	struct lpass_data *drv = container_of(work, struct lpass_data, work);
 
 	pr_err("Watchdog bite received from ADSP!\n");
+	//panic("Watchdog bite received from ADSP!\n");  //ASUSDEBUG +++ Jeffery_Hu@asus.com "panic when watchdog bite received from ADSP"
 	restart_adsp(drv);
 }
 

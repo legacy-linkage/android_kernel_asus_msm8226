@@ -450,6 +450,9 @@ err_put:
 }
 EXPORT_SYMBOL(kgsl_snapshot_get_object);
 
+//ASUSBSP: breeze, forece pet watchdog to avoid wdt+++
+extern void asus_pet_watchdog(void);
+//ASUSBSP: breeze, forece pet watchdog to avoid wdt---
 /*
  * kgsl_snapshot_dump_regs - helper function to dump device registers
  * @device - the device to dump registers from
@@ -496,7 +499,7 @@ int kgsl_snapshot_dump_regs(struct kgsl_device *device, void *snapshot,
 		for (j = 0; j < regs->count; j++) {
 			unsigned int start = regs->regs[j * 2];
 			unsigned int end = regs->regs[j * 2 + 1];
-
+			
 			for (k = start; k <= end; k++) {
 				unsigned int val;
 
@@ -504,6 +507,9 @@ int kgsl_snapshot_dump_regs(struct kgsl_device *device, void *snapshot,
 				*data++ = k;
 				*data++ = val;
 			}
+			//ASUSBSP: breeze, forece pet watchdog to avoid wdt+++
+			asus_pet_watchdog();
+			//ASUSBSP: breeze, forece pet watchdog to avoid wdt---
 		}
 	}
 
@@ -660,7 +666,7 @@ static ssize_t snapshot_show(struct file *filep, struct kobject *kobj,
 		return 0;
 
 	/* Get the mutex to keep things from changing while we are dumping */
-	mutex_lock(&device->mutex);
+	kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 
 	obj_itr_init(&itr, buf, off, count);
 
@@ -699,7 +705,7 @@ static ssize_t snapshot_show(struct file *filep, struct kobject *kobj,
 	}
 
 done:
-	mutex_unlock(&device->mutex);
+	kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 
 	return itr.write;
 }
@@ -731,12 +737,12 @@ static ssize_t trigger_store(struct kgsl_device *device, const char *buf,
 	size_t count)
 {
 	if (device && count > 0) {
-		mutex_lock(&device->mutex);
+		kgsl_mutex_lock(&device->mutex, &device->mutex_owner);
 		if (!kgsl_active_count_get(device)) {
 				kgsl_device_snapshot(device, 0);
 				kgsl_active_count_put(device);
 		}
-		mutex_unlock(&device->mutex);
+		kgsl_mutex_unlock(&device->mutex, &device->mutex_owner);
 	}
 
 	return count;

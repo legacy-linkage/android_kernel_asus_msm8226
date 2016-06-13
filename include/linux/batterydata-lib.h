@@ -134,7 +134,12 @@ extern struct bms_battery_data  desay_5200_data;
 extern struct bms_battery_data  oem_batt_data;
 extern struct bms_battery_data QRD_4v35_2000mAh_data;
 extern struct bms_battery_data  qrd_4v2_1300mah_data;
-
+#ifdef ASUS_A500KL_PROJECT
+extern struct bms_battery_data A500KL_2050mAh_Battery_Profile;
+extern struct bms_battery_data LG_Generic_2030mAh_Battery_Profile_99;
+#elif defined(ASUS_A600KL_PROJECT)
+extern struct bms_battery_data A600KL_3200mAh_Profile;
+#endif
 int interpolate_fcc(struct single_row_lut *fcc_temp_lut, int batt_temp);
 int interpolate_scalingfactor(struct sf_lut *sf_lut, int row_entry, int pc);
 int interpolate_scalingfactor_fcc(struct single_row_lut *fcc_sf_lut,

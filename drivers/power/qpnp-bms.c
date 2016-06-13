@@ -27,7 +27,13 @@
 #include <linux/qpnp/qpnp-adc.h>
 #include <linux/qpnp/power-on.h>
 #include <linux/of_batterydata.h>
-
+//ASUS_BSP frank_tao +++
+#include <linux/proc_fs.h>
+#ifdef CONFIG_EEPROM_PADSTATION
+#include "linux/microp_api.h"
+#endif
+#include <linux/asus_bat.h>
+//ASUS_BSP frank_tao ---
 /* BMS Register Offsets */
 #define REVISION1			0x0
 #define REVISION2			0x1
@@ -312,7 +318,20 @@ static int discard_backup_fcc_data(struct qpnp_bms_chip *chip);
 static void backup_charge_cycle(struct qpnp_bms_chip *chip);
 
 static bool bms_reset;
+//ASUS_BSP frank_tao +++
+struct qpnp_bms_chip *g_qpnp_bms_chip;
 
+#ifdef CONFIG_PM_8226_CHARGER
+extern int pm8226_get_prop_batt_temp(void);
+extern int pm8226_get_prop_battery_voltage_now(void);
+//Eason don't calculate BMS actively, only read+++
+static int g_bms_fcc;
+static int g_bms_uuc;
+static int g_bms_ocv_charge;
+static int g_bms_cc;
+//Eason don't calculate BMS actively, only read---
+#endif
+//ASUS_BSP frank_tao ---
 static int qpnp_read_wrapper(struct qpnp_bms_chip *chip, u8 *val,
 			u16 base, int count)
 {
@@ -1606,6 +1625,18 @@ static void calculate_soc_params(struct qpnp_bms_chip *chip,
 	params->uuc_uah = calculate_unusable_charge_uah(chip, params,
 							batt_temp);
 	pr_debug("UUC = %uuAh\n", params->uuc_uah);
+		//Eason don't calculate BMS actively, only read+++
+#ifdef CONFIG_PM_8226_CHARGER
+	g_bms_fcc = params->fcc_uah;
+	g_bms_uuc = params->uuc_uah;
+	g_bms_ocv_charge = params->ocv_charge_uah;
+	g_bms_cc = params->cc_uah;
+#endif
+	//Eason don't calculate BMS actively, only read---
+	//ASUS_BSP Eason add BMS log+++
+	printk("[BAT][BMS]FCC:%d, OCV:%d, CC:%d, UUC:%d, temp:%d, rbatt:%d\n"
+			,params->fcc_uah, params->ocv_charge_uah, params->cc_uah, params->uuc_uah, batt_temp, params->rbatt_mohm);
+	//ASUS_BSP Eason add BMS log---
 }
 
 static int bound_soc(int soc)
@@ -3246,7 +3277,8 @@ static void charging_ended(struct qpnp_bms_chip *chip)
 	} else if (chip->charging_adjusted_ocv > 0) {
 		pr_debug("Charging stopped before full, adjusted OCV = %d\n",
 				chip->charging_adjusted_ocv);
-		chip->last_ocv_uv = chip->charging_adjusted_ocv;
+		if(chip->charging_adjusted_ocv > chip->last_ocv_uv)//only report a higher ocv during charging phase
+			chip->last_ocv_uv = chip->charging_adjusted_ocv;
 	}
 
 	chip->charging_adjusted_ocv = -EINVAL;
@@ -3515,6 +3547,11 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 	shutdown_soc = read_shutdown_soc(chip);
 	invalid_stored_soc = (shutdown_soc == SOC_INVALID);
 
+//Frank: skip shutdown_soc workaround for ATD +++
+#ifdef ASUS_FACTORY_BUILD
+	invalid_stored_soc = true;
+#endif
+//Frank: skip shutdown_soc workaround for ATD ---
 	/*
 	 * Do a quick run of SoC calculation to find whether the shutdown soc
 	 * is close enough.
@@ -3590,18 +3627,48 @@ static int64_t read_battery_id(struct qpnp_bms_chip *chip)
 
 	return result.physical;
 }
-
+int64_t read_BatID(void)
+{
+	return read_battery_id(g_qpnp_bms_chip);
+}
 static int set_battery_data(struct qpnp_bms_chip *chip)
 {
 	int64_t battery_id;
 	int rc = 0, dt_data = false;
 	struct bms_battery_data *batt_data;
 	struct device_node *node;
-
+	battery_id = read_battery_id(chip);
 	if (chip->batt_type == BATT_DESAY) {
 		batt_data = &desay_5200_data;
 	} else if (chip->batt_type == BATT_PALLADIUM) {
+	#ifdef ASUS_A500KL_PROJECT
+		if(battery_id >= 1555000 && battery_id <= 1790000)
+			{
+				pr_info("load coslight BMS table!\n");
+				batt_data = &A500KL_2050mAh_Battery_Profile;
+			}
+		else
+			if(battery_id >= 855000 && battery_id <= 984000)
+			{
+				pr_info("load ATL BMS table!\n");
+				batt_data = &A500KL_2050mAh_Battery_Profile;
+			}
+			else
+				if(battery_id >= 569000 && battery_id <= 655000)
+				{
+					pr_info("load LG BMS table!\n");
+					batt_data = &LG_Generic_2030mAh_Battery_Profile_99;
+				}
+				else
+				{
+					pr_info("load unknow BMS table!\n");
+					batt_data = &A500KL_2050mAh_Battery_Profile;
+				}
+	#elif defined(ASUS_A600KL_PROJECT)
+		batt_data = &A600KL_3200mAh_Profile;
+	#else
 		batt_data = &palladium_1500_data;
+	#endif
 	} else if (chip->batt_type == BATT_OEM) {
 		batt_data = &oem_batt_data;
 	} else if (chip->batt_type == BATT_QRD_4V35_2000MAH) {
@@ -4148,13 +4215,189 @@ static int setup_die_temp_monitoring(struct qpnp_bms_chip *chip)
 	pr_debug("setup complete\n");
 	return 0;
 }
+//ASUS_BSP frank_tao +++
+static ssize_t bat_current_read_proc(char *page, char **start, off_t off, int count, 
+            	int *eof, void *data)
+{
+	int current_value;
+	
+	current_value = get_prop_bms_current_now(g_qpnp_bms_chip);
+	current_value = -current_value;
+	return sprintf(page, "%d\n", current_value);
+}
 
+void static create_bat_current_proc(void)
+{
+	struct proc_dir_entry *bat_current_proc_file = create_proc_entry("bat_current", 0644, NULL);
+
+	if (bat_current_proc_file) {
+		bat_current_proc_file->read_proc = bat_current_read_proc;
+	}
+    	else {
+		printk("[BAT]proc file create failed!\n");
+    	}
+
+	return;
+}
+
+#ifdef CONFIG_EEPROM_PADSTATION
+static ssize_t pad_dump_read_proc(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	char cap[2];
+	char bat_info[6];
+	
+	if(AX_MicroP_getBatterySoc(cap) < 0){
+		cap[0] = 0xFF;
+		cap[1] = 0xFF;
+	}
+	
+	if(AX_MicroP_getBatteryInfo(bat_info) < 0){
+		int i;
+		for(i=0; i<6; i++){
+			bat_info[i] = 0xFF;
+		}
+	}
+	
+	return sprintf(page, "RSOC: %d\n"
+						"USOC: %d\n"
+						"VOLT(mV): %d\n"
+						"AI(mA): %d\n"
+						"TEMP(degC): %d\n"
+						"Gauge Mode: %d\n"
+						, cap[0]
+						, cap[1]
+						, bat_info[0] + (bat_info[1] << 8)
+						, bat_info[2] + (bat_info[3] << 8)
+						, bat_info[4]
+						, bat_info[5]
+						);
+}
+
+void static create_pad_dump_proc_file(void)
+{
+	struct proc_dir_entry *PadDump_proc_file = create_proc_entry("driver/bq27520_pad_test_info_dump", 0444, NULL);
+
+	if (PadDump_proc_file) {
+		PadDump_proc_file->read_proc = pad_dump_read_proc;
+	}
+	else {
+		printk("[BAT][GAU][TI][Proc]pad_dump proc file create failed!\n");
+	}
+
+	return;
+}
+#endif
+
+
+static ssize_t pm8226_dump_read_proc(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int batt_temp;
+	int fcc_uah;
+	struct raw_soc_params raw;
+	struct soc_params params;
+	int ocv_charge_uah;
+	int cc_uah;
+	
+	batt_temp = pm8226_get_prop_batt_temp();
+	fcc_uah = calculate_fcc(g_qpnp_bms_chip, batt_temp);
+	read_soc_params_raw(g_qpnp_bms_chip, &raw, batt_temp);
+	calculate_soc_params(g_qpnp_bms_chip, &raw, &params, batt_temp);
+	
+	ocv_charge_uah = calculate_ocv_charge(g_qpnp_bms_chip, &raw, fcc_uah);
+	cc_uah = get_prop_bms_charge_counter(g_qpnp_bms_chip);
+	
+	return sprintf(page, "FCC(mAh): %d\n"
+						"RM(mAh): %d\n"
+						"SOC: %d\n"
+						"VOLT(mV): %d\n"
+						"AI(mA): %d\n"
+						"TEMP(degC): %d\n"
+						"BMS: %d\n"
+						, g_bms_fcc - g_bms_uuc
+						, g_bms_ocv_charge - g_bms_cc - g_bms_uuc
+						, asus_bat_report_phone_capacity(100)
+						, pm8226_get_prop_battery_voltage_now()
+						, get_prop_bms_current_now(g_qpnp_bms_chip)
+						, batt_temp
+						, get_prop_bms_capacity(g_qpnp_bms_chip)
+						);
+}
+
+void static create_pm8226_dump_proc_file(void)
+{
+	struct proc_dir_entry *PM8226Dump_proc_file = create_proc_entry("driver/bq27520_test_info_dump", 0444, NULL);
+
+	if (PM8226Dump_proc_file) {
+		PM8226Dump_proc_file->read_proc = pm8226_dump_read_proc;
+	}
+	else {
+		printk("[BAT][GAU][TI][Proc]PM8226_dump proc file create failed!\n");
+	}
+
+	return;
+}
+
+static ssize_t pm8226_temp_read_proc(char *page, char **start, off_t off, int count, 
+            	int *eof, void *data)
+{
+	int batt_temp;
+	
+	batt_temp = pm8226_get_prop_batt_temp();
+	return sprintf(page, "%d\n", batt_temp);
+}
+
+void static create_pm8226_temp_proc_file(void)
+{
+	struct proc_dir_entry *PM8226Temp_proc_file = create_proc_entry("driver/BatTemp", 0644, NULL);
+
+	if (PM8226Temp_proc_file) {
+		PM8226Temp_proc_file->read_proc = pm8226_temp_read_proc;
+	}
+	else {
+		printk("[BAT][GAU][TI][Proc]PM8226Temp proc file create failed!\n");
+	}
+
+	return;
+}
+static ssize_t pm8226_bat_id_read_proc(char *page, char **start, off_t off, int count, 
+            	int *eof, void *data)
+{
+	int bat_id;
+	
+	bat_id = read_battery_id(g_qpnp_bms_chip);
+	return sprintf(page, "%d\n", bat_id);
+}
+void static create_pm8226_bat_id_proc_file(void)
+{
+	struct proc_dir_entry *PM8226_bat_id_proc_file = create_proc_entry("driver/BatID", 0644, NULL);
+
+	if (PM8226_bat_id_proc_file) {
+		PM8226_bat_id_proc_file->read_proc = pm8226_bat_id_read_proc;
+	}
+	else {
+		printk("[BAT][GAU][TI][Proc]PM8226_bat_id proc file create failed!\n");
+	}
+
+	return;
+}
+void calculate_FCC_and_RM(int * data)
+{
+	data[0] = g_bms_fcc - g_bms_uuc;
+	data[1] = g_bms_ocv_charge - g_bms_cc - g_bms_uuc;
+}
+//ASUS_BSP frank_tao ---
+#ifdef ASUS_FACTORY_BUILD
+extern bool qpnp_charger_probe_flag;
+extern bool SW_charging_enable;
+extern void pm8226_chg_enable_charging(bool enable);
+extern void pm8226_chg_usb_suspend_enable(int enable);
+#endif
 static int __devinit qpnp_bms_probe(struct spmi_device *spmi)
 {
 	struct qpnp_bms_chip *chip;
 	bool warm_reset;
 	int rc, vbatt;
-
+	pr_info("start!\n");
 	chip = devm_kzalloc(&spmi->dev, sizeof(struct qpnp_bms_chip),
 			GFP_KERNEL);
 
@@ -4260,7 +4503,16 @@ static int __devinit qpnp_bms_probe(struct spmi_device *spmi)
 
 	dev_set_drvdata(&spmi->dev, chip);
 	device_init_wakeup(&spmi->dev, 1);
-
+//Frank: disable input current workaround for ATD +++
+#ifdef ASUS_FACTORY_BUILD
+	if(qpnp_charger_probe_flag == true)
+	{
+		SW_charging_enable = false;
+		pm8226_chg_enable_charging(false);
+		pm8226_chg_usb_suspend_enable(1);
+	}
+#endif
+//Frank: disable input current workaround for ATD ---
 	load_shutdown_data(chip);
 
 	if (chip->enable_fcc_learning) {
@@ -4292,7 +4544,13 @@ static int __devinit qpnp_bms_probe(struct spmi_device *spmi)
 		pr_err("failed to set up die temp notifications: %d\n", rc);
 		goto error_setup;
 	}
-
+	
+	rc = bms_request_irqs(chip);
+	if (rc) {
+		pr_err("error requesting bms irqs, rc = %d\n", rc);
+		goto error_setup;
+	}
+	
 	battery_insertion_check(chip);
 	batfet_status_check(chip);
 	battery_status_check(chip);
@@ -4326,15 +4584,35 @@ static int __devinit qpnp_bms_probe(struct spmi_device *spmi)
 		goto unregister_dc;
 	}
 
-	rc = bms_request_irqs(chip);
-	if (rc) {
-		pr_err("error requesting bms irqs, rc = %d\n", rc);
-		goto unregister_dc;
-	}
 
 	pr_info("probe success: soc =%d vbatt = %d ocv = %d r_sense_uohm = %u warm_reset = %d\n",
 			get_prop_bms_capacity(chip), vbatt, chip->last_ocv_uv,
 			chip->r_sense_uohm, warm_reset);
+
+//Frank: enable input current workaround for ATD +++
+#ifdef ASUS_FACTORY_BUILD
+	if(qpnp_charger_probe_flag == true)
+	{
+		SW_charging_enable = true;
+		pm8226_chg_enable_charging(true);
+		pm8226_chg_usb_suspend_enable(0);
+	}
+#endif
+//Frank: enable input current workaround for ATD ---
+	//ASUS_BSP frank_tao +++
+	g_qpnp_bms_chip = chip;
+	create_bat_current_proc();
+
+
+	create_pm8226_dump_proc_file();
+	create_pm8226_temp_proc_file();
+	create_pm8226_bat_id_proc_file();
+
+#ifdef CONFIG_EEPROM_PADSTATION
+	create_pad_dump_proc_file();
+#endif
+	//ASUS_BSP frank_tao ---
+
 	return 0;
 
 unregister_dc:

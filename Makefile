@@ -644,6 +644,44 @@ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-goto.sh $(CC)), y)
 	KBUILD_CFLAGS += -DCC_HAVE_ASM_GOTO
 endif
 
+# add ASUS software version support
+ifneq ($(BUILD_NUMBER),)
+        KBUILD_CPPFLAGS += -DASUS_SW_VER=\"$(BUILD_NUMBER)\"
+else
+        KBUILD_CPPFLAGS += -DASUS_SW_VER=\"$(ASUS_BUILD_PROJECT)_ENG\"
+endif
+
+# ASUS_BSP "support A600KL build"
+ifeq ($(ASUS_BUILD_PROJECT), A600KL)
+	KBUILD_CPPFLAGS += -DASUS_A600KL_PROJECT=1
+endif
+# ASUS_BSP "support A600KL build"
+
+# ASUS_BSP "support A500KL build"
+ifeq ($(ASUS_BUILD_PROJECT), A500KL)
+	KBUILD_CPPFLAGS += -DASUS_A500KL_PROJECT=1
+   KBUILD_CPPFLAGS += -DASUS_CHARGING_MODE=1
+endif
+# ASUS_BSP "support A500KL build"
+
+# ASUS_BSP "factory compile option support"
+ifneq ($(ASUS_FACTORY_BUILD),)
+	KBUILD_CPPFLAGS += -DASUS_FACTORY_BUILD=1
+endif
+# ASUS_BSP "factory compile option support"
+
+# ASUS_BSP : for user build
+ifeq ($(TARGET_BUILD_VARIANT), user)
+	KBUILD_CPPFLAGS += -DASUS_SHIP_BUILD=1
+endif
+# ASUS_BSP : for user build
+
+# ASUS_BSP : for userdebug build
+ifeq ($(TARGET_BUILD_VARIANT), userdebug)
+	KBUILD_CPPFLAGS += -DASUS_USERDEBUG_BUILD=1
+endif
+# ASUS_BSP : for userdebug build
+
 # Add user supplied CPPFLAGS, AFLAGS and CFLAGS as the last assignments
 # But warn user when we do so
 warn-assign = \

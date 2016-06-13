@@ -2528,7 +2528,7 @@ config MSM_SHOW_RESUME_IRQ
 	bool "Enable logging of interrupts that could have caused resume"
 	depends on (ARM_GIC || PMIC8058)
 	default y if PMIC8058
-	default n
+	default y
 	help
 		This option logs wake up interrupts that have triggered just before
 		the resume loop unrolls. Say Y if you want to debug why the system

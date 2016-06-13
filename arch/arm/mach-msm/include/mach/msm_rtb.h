@@ -32,7 +32,36 @@ enum logk_event_type {
 struct msm_rtb_platform_data {
 	unsigned int size;
 };
+//ASUSDEBUG ++ jeffery_hu@asus.com
+/* Write
+ * 1) 3 bytes sentinel
+ * 2) 1 bytes of log type
+ * 3) 4 bytes of where the caller came from
+ * 4) 4 bytes index
+ * 4) 4 bytes extra data from the caller
+ *
+ * Total = 16 bytes.
+ */
+struct msm_rtb_layout {
+	unsigned char sentinel[3];
+	unsigned char log_type;
+	void *caller;
+	unsigned long idx;
+	void *data;
+} __attribute__ ((__packed__));
 
+
+struct msm_rtb_state {
+	struct msm_rtb_layout *rtb;
+	phys_addr_t phys;
+	int nentries;
+	int size;
+	int enabled;
+	int initialized;
+	uint32_t filter;
+	int step_size;
+};
+//ASUSDEBUG --
 #if defined(CONFIG_MSM_RTB)
 /*
  * returns 1 if data was logged, 0 otherwise

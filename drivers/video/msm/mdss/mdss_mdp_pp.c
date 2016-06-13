@@ -2369,6 +2369,8 @@ igc_config_exit:
 	mutex_unlock(&mdss_pp_mutex);
 	return ret;
 }
+#if 0
+
 static void pp_update_gc_one_lut(char __iomem *addr,
 		struct mdp_ar_gc_lut_data *lut_data,
 		uint8_t num_stages)
@@ -2405,6 +2407,44 @@ static void pp_update_gc_one_lut(char __iomem *addr,
 		writel_relaxed(lut_data[idx].offset, addr);
 	}
 }
+
+#else
+
+
+static void pp_update_gc_one_lut(char __iomem *addr,
+		struct mdp_ar_gc_lut_data *lut_data,
+		uint8_t num_stages)
+{
+	int i, start_idx;
+
+    for (i = 0; i < GC_LUT_SEGMENTS; i++) {
+        if (lut_data[i].x_start == 0xfff) {
+            lut_data[i].slope = lut_data[i-1].slope;
+            lut_data[i].offset = lut_data[i-1].offset;
+        }
+    }
+
+    start_idx = (readl_relaxed(addr) >> 16) & 0xF;
+    for (i = start_idx; i < GC_LUT_SEGMENTS; i++)
+		writel_relaxed(lut_data[i].x_start, addr);
+    for (i = 0; i < start_idx; i++)
+		writel_relaxed(lut_data[i].x_start, addr);
+    addr += 4;
+    start_idx = (readl_relaxed(addr) >> 16) & 0xF;
+    for (i = start_idx; i < GC_LUT_SEGMENTS; i++)
+		writel_relaxed(lut_data[i].slope, addr);
+    for (i = 0; i < start_idx; i++)
+		writel_relaxed(lut_data[i].slope, addr);
+    addr += 4;
+    start_idx = (readl_relaxed(addr) >> 16) & 0xF;
+    for (i = start_idx; i < GC_LUT_SEGMENTS; i++)
+        writel_relaxed(lut_data[i].offset, addr);
+    for (i = 0; i < start_idx; i++)
+	writel_relaxed(lut_data[i].offset, addr);
+}
+
+#endif
+
 static void pp_update_argc_lut(char __iomem *addr,
 				struct mdp_pgc_lut_data *config)
 {

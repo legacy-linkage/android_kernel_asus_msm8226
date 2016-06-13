@@ -4,6 +4,10 @@
 
 menu "Misc devices"
 
+config REGISTER_READER
+	bool "register_reader"
+	default n
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
@@ -664,6 +668,16 @@ config TI_DRV2667
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called ti_drv2667.
+
+#ASUS_BSP +++ pansy_chen "[A500KL][Sensor][NA][Spec] Porting Ak09911 E-compass"
+config SENSORS_AK09911
+    tristate "AK09911 compass support"
+    default n
+    depends on I2C
+    help
+    If you say yes here you get support for Asahi Kasei's
+    orientation sensor AK09911.
+#ASUS_BSP --- pansy_chen "[A500KL][Sensor][NA][Spec] Porting Ak09911 E-compass"
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"

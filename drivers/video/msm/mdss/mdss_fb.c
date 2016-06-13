@@ -123,7 +123,7 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 
 	if (notify == NOTIFY_UPDATE_START) {
 		INIT_COMPLETION(mfd->update.comp);
-		ret = wait_for_completion_timeout(
+		ret = wait_for_completion_interruptible_timeout(
 						&mfd->update.comp, 4 * HZ);
 		to_user = (unsigned int)mfd->update.value;
 		if (mfd->update.type == NOTIFY_TYPE_SUSPEND) {
@@ -132,13 +132,13 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 		}
 	} else if (notify == NOTIFY_UPDATE_STOP) {
 		INIT_COMPLETION(mfd->no_update.comp);
-		ret = wait_for_completion_timeout(
+		ret = wait_for_completion_interruptible_timeout(
 						&mfd->no_update.comp, 4 * HZ);
 		to_user = (unsigned int)mfd->no_update.value;
 	} else {
 		if (mfd->panel_power_on) {
 			INIT_COMPLETION(mfd->power_off_comp);
-			ret = wait_for_completion_timeout(
+			ret = wait_for_completion_interruptible_timeout(
 						&mfd->power_off_comp, 1 * HZ);
 		}
 	}
@@ -150,6 +150,9 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 	return ret;
 }
 
+#if defined(ASUS_A600KL_PROJECT) || defined(ASUS_A500KL_PROJECT)
+
+#else
 static int mdss_fb_splash_thread(void *data)
 {
 	struct msm_fb_data_type *mfd = data;
@@ -191,6 +194,7 @@ end:
 	return ret;
 }
 
+#endif
 static int lcd_backlight_registered;
 
 static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
@@ -450,7 +454,9 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		mfd->mdp_sync_pt_data.threshold = 1;
 	else
 		mfd->mdp_sync_pt_data.threshold = 2;
+#if defined(ASUS_A600KL_PROJECT) || defined(ASUS_A500KL_PROJECT)
 
+#else
 	if (mfd->index == 0) {
 		mfd->splash_thread = kthread_run(mdss_fb_splash_thread, mfd,
 				"mdss_fb_splash");
@@ -460,7 +466,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 			mfd->splash_thread = NULL;
 		}
 	}
-
+#endif
 	return rc;
 }
 
@@ -807,6 +813,8 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 		}
 		break;
 	}
+	/* Notify listeners */
+	sysfs_notify(&mfd->fbi->dev->kobj, NULL, "show_blank_event");
 
 	return ret;
 }
@@ -1245,12 +1253,16 @@ static int mdss_fb_open(struct fb_info *info, int user)
 
 	pinfo->ref_cnt++;
 	mfd->ref_cnt++;
+#if defined(ASUS_A600KL_PROJECT) || defined(ASUS_A500KL_PROJECT)
+
+#else
 
 	/* Stop the splash thread once userspace open the fb node */
 	if (mfd->splash_thread && mfd->ref_cnt > 1) {
 		kthread_stop(mfd->splash_thread);
 		mfd->splash_thread = NULL;
 	}
+#endif
 
 	return 0;
 
@@ -1704,7 +1716,7 @@ static int __mdss_fb_display_thread(void *data)
 				mfd->index);
 
 	while (1) {
-		wait_event(mfd->commit_wait_q,
+		wait_event_interruptible(mfd->commit_wait_q,
 				(atomic_read(&mfd->commits_pending) ||
 				 kthread_should_stop()));
 

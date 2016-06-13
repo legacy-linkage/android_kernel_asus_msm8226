@@ -26,6 +26,8 @@
 #include "mdss_panel.h"
 #include "mdss_dsi.h"
 #include "mdss_debug.h"
+#include "mdss_asus_debug.h"
+
 
 static unsigned char *mdss_dsi_base;
 
@@ -982,7 +984,9 @@ static int __devinit mdss_dsi_ctrl_probe(struct platform_device *pdev)
 		pr_err("%s: can't find panel node %s\n", __func__, panel_cfg);
 		goto error_pan_node;
 	}
-
+	notify_panel_on_cmds_start(ctrl_pdata);
+	create_lcd_unique_id_proc_file();
+	create_lcd_type_proc_file();
 	cmd_cfg_cont_splash = mdss_panel_get_boot_cfg() ? true : false;
 
 	rc = mdss_dsi_panel_init(dsi_pan_node, ctrl_pdata, cmd_cfg_cont_splash);
@@ -1008,7 +1012,7 @@ error_ioremap:
 	iounmap(mdss_dsi_base);
 error_no_mem:
 	devm_kfree(&pdev->dev, ctrl_pdata);
-
+	notify_panel_on_cmds_start(NULL);
 	return rc;
 }
 
