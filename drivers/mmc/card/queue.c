@@ -21,6 +21,20 @@
 #include <linux/mmc/host.h>
 #include "queue.h"
 
+//ASUS_BSP +++ Lei_Guo "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+#include "../core/mmc_ops.h"
+#include "../core/core.h"
+#include <linux/delay.h>
+
+#define MIN_SECTORS_1GB (1024*1024*2) /* 1GB */
+
+#define MIN_SECTORS_100MB (1024*100*2) /* 100MB */
+#endif
+//ASUS_BSP --- Lei_Guo "cmd5 stress test"
+
+#include <linux/delay.h>
+
 #define MMC_QUEUE_BOUNCESZ	65536
 
 
@@ -55,6 +69,41 @@ static int mmc_prep_request(struct request_queue *q, struct request *req)
 
 	return BLKPREP_OK;
 }
+
+//ASUS_BSP +++ Gavin_Chang "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+static int mmc_run_cmd5test(struct mmc_queue *mq)
+{
+	int err;
+
+	if (mq->card->sectors_changed < MIN_SECTORS_1GB)
+		return 0;
+
+	mq->card->sectors_changed = 0;
+	mq->card->host->sleepcnt++;
+
+	pr_info("%s: sleepcnt:%d\n", mmc_hostname(mq->card->host), mq->card->host->sleepcnt);
+
+	mmc_claim_host(mq->card->host);
+	err = mmc_card_sleepawake(mq->card->host, 1);
+	if (err)
+		pr_err("%s: error %d while sleep in %s()\n", mmc_hostname(mq->card->host), err, __func__);
+	mmc_release_host(mq->card->host);
+
+	msleep(500);
+
+	mmc_claim_host(mq->card->host);
+	err = mmc_card_sleepawake(mq->card->host, 0);
+	if (err)
+		pr_err("%s: error %d while awake in %s()\n", mmc_hostname(mq->card->host), err, __func__);
+	mmc_release_host(mq->card->host);
+
+	msleep(500);
+
+	return 0;
+}
+#endif
+//ASUS_BSP --- Gavin_Chang "cmd5 stress test"
 
 static int mmc_queue_thread(void *d)
 {
@@ -116,6 +165,12 @@ static int mmc_queue_thread(void *d)
 				set_current_state(TASK_RUNNING);
 				break;
 			}
+//ASUS_BSP +++ Lei_Guo "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+			if (mq->card->host->cmd5test)
+				mmc_run_cmd5test(mq);
+#endif
+//ASUS_BSP --- Lei_Guo "cmd5 stress test"
 			mmc_start_delayed_bkops(card);
 			mq->card->host->context_info.is_urgent = false;
 			up(&mq->thread_sem);
@@ -490,6 +545,7 @@ int mmc_queue_suspend(struct mmc_queue *mq, int wait)
 		blk_stop_queue(q);
 		spin_unlock_irqrestore(q->queue_lock, flags);
 
+		msleep(80);//workaround for eMMC suspend add by lei_guo
 		rc = down_trylock(&mq->thread_sem);
 		if (rc && !wait) {
 			/*

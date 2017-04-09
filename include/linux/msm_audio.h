@@ -67,6 +67,15 @@
 
 #define AUDIO_SET_SRS_TRUMEDIA_PARAM _IOW(AUDIO_IOCTL_MAGIC, 43, unsigned)
 
+//mei_huang@asus.com +++
+#define AUDIO_SET_SKYPE_STATE       _IOW(AUDIO_IOCTL_MAGIC, 74, unsigned)
+#define AUDIO_GET_SKYPE_STATE       _IOR(AUDIO_IOCTL_MAGIC, 75, unsigned)
+#define AUDIO_SET_RINGTONE_STATE    _IOW(AUDIO_IOCTL_MAGIC, 76, unsigned)
+#define AUDIO_GET_RINGTONE_STATE    _IOR(AUDIO_IOCTL_MAGIC, 77, unsigned)
+#define AUDIO_SET_VR_STATE          _IOR(AUDIO_IOCTL_MAGIC, 78, unsigned)
+#define AUDIO_GET_VR_STATE          _IOR(AUDIO_IOCTL_MAGIC, 79, unsigned)
+//mei_huang@asus.com ---
+
 /* Qualcomm extensions */
 #define AUDIO_SET_STREAM_CONFIG   _IOW(AUDIO_IOCTL_MAGIC, 80, \
 				struct msm_audio_stream_config)
@@ -96,6 +105,10 @@
 
 #define AUDIO_REGISTER_ION _IOW(AUDIO_IOCTL_MAGIC, 97, unsigned)
 #define AUDIO_DEREGISTER_ION _IOW(AUDIO_IOCTL_MAGIC, 98, unsigned)
+
+//mei_huang@asus.com +++
+#define AUDIO_SET_INCALL_STATE      _IOW(AUDIO_IOCTL_MAGIC, 99, unsigned)
+//mei_huang@asus.com ---
 
 #define	AUDIO_MAX_COMMON_IOCTL_NUM	100
 

@@ -63,6 +63,9 @@ module_param_named(
 
 static bool use_acpuclk_apis;
 
+unsigned int pwrcs_time, pm_pwrcs_ret=0;
+extern ktime_t ktime_get_v2(void);
+
 enum {
 	MSM_PM_DEBUG_SUSPEND = BIT(0),
 	MSM_PM_DEBUG_POWER_COLLAPSE = BIT(1),
@@ -791,6 +794,7 @@ int msm_cpu_pm_enter_sleep(enum msm_pm_sleep_mode mode, bool from_idle)
 	int64_t time;
 	bool collapsed = 1;
 	int exit_stat = -1;
+	int64_t elapsed_time;
 
 	if (MSM_PM_DEBUG_IDLE & msm_pm_debug_mask)
 		pr_info("CPU%u: %s: mode %d\n",
@@ -801,6 +805,8 @@ int msm_cpu_pm_enter_sleep(enum msm_pm_sleep_mode mode, bool from_idle)
 
 	if (from_idle)
 		time = sched_clock();
+	else
+		time = ktime_to_ns(ktime_get_v2());
 
 	if (execute[mode])
 		exit_stat = execute[mode](from_idle);
@@ -810,6 +816,15 @@ int msm_cpu_pm_enter_sleep(enum msm_pm_sleep_mode mode, bool from_idle)
 		msm_pm_ftrace_lpm_exit(smp_processor_id(), mode, collapsed);
 		if (exit_stat >= 0)
 			msm_pm_add_stat(exit_stat, time);
+	}
+	else
+	{
+		time = ktime_to_ns(ktime_get_v2()) - time;
+		elapsed_time = time;
+		do_div(elapsed_time, NSEC_PER_SEC / 100);
+		pwrcs_time = elapsed_time;
+		//pr_info("[PM]Suspended for %d.%02d seconds\n", pwrcs_time/100, pwrcs_time%100);
+		pm_pwrcs_ret=1;
 	}
 
 	return collapsed;

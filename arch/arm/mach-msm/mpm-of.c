@@ -52,6 +52,14 @@ enum {
 	MSM_NR_IRQS_SET,
 };
 
+#define MAX_MPM_PENDING_IRQ_COUNT 16
+#define MSM_MPM_REG_PENDING_WIDTH 2
+struct mpm_pending_irq {
+	unsigned long pending;
+	unsigned int mpm_irq[MAX_MPM_PENDING_IRQ_COUNT];
+	unsigned int apps_irq[MAX_MPM_PENDING_IRQ_COUNT];
+};
+
 struct mpm_irqs_a2m {
 	struct irq_domain *domain;
 	struct device_node *parent;
@@ -82,6 +90,9 @@ static unsigned int msm_mpm_irqs_m2a[MSM_MPM_NR_MPM_IRQS];
 #define SCLK_HZ (32768)
 #define ARCH_TIMER_HZ (19200000)
 static struct msm_mpm_device_data msm_mpm_dev_data;
+
+struct mpm_pending_irq resume_mpm_pending_irq[MSM_MPM_REG_PENDING_WIDTH];
+int mpm_pending_cont[MSM_MPM_REG_PENDING_WIDTH];
 
 static struct clk *xo_clk;
 static bool xo_enabled;
@@ -543,6 +554,17 @@ void msm_mpm_exit_sleep(bool from_idle)
 	enabled_intr = from_idle ? msm_mpm_enabled_irq :
 						msm_mpm_wake_irq;
 
+	//++ASUS BSP Vincent- initial mpm_pending_irq info
+	for (i = 0; i < MSM_MPM_REG_PENDING_WIDTH; i++) {
+		resume_mpm_pending_irq[i].pending = 0;
+		mpm_pending_cont[i] = 0;
+		for (k = 0; k < MAX_MPM_PENDING_IRQ_COUNT; k++) {
+			resume_mpm_pending_irq[i].mpm_irq[k] = 0;
+			resume_mpm_pending_irq[i].apps_irq[k] = 0;
+		}
+	}
+	//--ASUS BSP Vincent- initial mpm_pending_irq info
+
 	for (i = 0; i < MSM_MPM_REG_WIDTH; i++) {
 		pending = msm_mpm_read(MSM_MPM_REG_STATUS, i);
 		pending &= enabled_intr[i];
@@ -557,6 +579,18 @@ void msm_mpm_exit_sleep(bool from_idle)
 			unsigned int apps_irq = msm_mpm_get_irq_m2a(mpm_irq);
 			struct irq_desc *desc = apps_irq ?
 				irq_to_desc(apps_irq) : NULL;
+
+			if(i < MSM_MPM_REG_PENDING_WIDTH){
+				if(mpm_irq != 0 && apps_irq != 0){
+					//if(!from_idle) pr_info("[PM]MPM pending.%d: 0x%08lx, mpm_irq: %d, apps_irq: %d\n", i, pending, mpm_irq, apps_irq);
+					resume_mpm_pending_irq[i].pending = pending;
+					resume_mpm_pending_irq[i].mpm_irq[mpm_pending_cont[i]] = mpm_irq;
+					resume_mpm_pending_irq[i].apps_irq[mpm_pending_cont[i]] = apps_irq;
+					mpm_pending_cont[i]++;
+				}
+				if(mpm_pending_cont[i] >= MAX_MPM_PENDING_IRQ_COUNT)
+					mpm_pending_cont[i] = MAX_MPM_PENDING_IRQ_COUNT - 1;
+			}
 
 			if (desc && !irqd_is_level_type(&desc->irq_data)) {
 				irq_set_pending(apps_irq);

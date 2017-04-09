@@ -455,6 +455,9 @@ err_put:
 }
 EXPORT_SYMBOL(kgsl_snapshot_get_object);
 
+//ASUSBSP: breeze, forece pet watchdog to avoid wdt+++
+extern void asus_pet_watchdog(void);
+//ASUSBSP: breeze, forece pet watchdog to avoid wdt---
 /*
  * kgsl_snapshot_dump_regs - helper function to dump device registers
  * @device - the device to dump registers from
@@ -509,6 +512,9 @@ int kgsl_snapshot_dump_regs(struct kgsl_device *device, void *snapshot,
 				*data++ = k;
 				*data++ = val;
 			}
+			//ASUSBSP: breeze, forece pet watchdog to avoid wdt+++
+			asus_pet_watchdog();
+			//ASUSBSP: breeze, forece pet watchdog to avoid wdt---
 		}
 	}
 

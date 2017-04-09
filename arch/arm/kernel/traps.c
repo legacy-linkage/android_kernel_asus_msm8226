@@ -37,7 +37,11 @@
 #include <asm/system_misc.h>
 
 #include <trace/events/exception.h>
-
+//ASUSDEBUG + jeffery_hu@asus.com
+#include <linux/stacktrace.h>
+static int asus_save_stack = 0;
+static struct stack_trace *asus_strace = NULL;
+//ASUSDEBUG -
 static const char *handler[]= { "prefetch abort", "data abort", "address exception", "interrupt" };
 
 void *vectors_page;
@@ -58,6 +62,14 @@ static void dump_mem(const char *, const char *, unsigned long, unsigned long);
 void dump_backtrace_entry(unsigned long where, unsigned long from, unsigned long frame)
 {
 #ifdef CONFIG_KALLSYMS
+	//ASUSDEBUG + jeffery_hu@asus.com
+	char sym1[KSYM_SYMBOL_LEN], sym2[KSYM_SYMBOL_LEN];
+	sprint_symbol(sym1, where);
+	sprint_symbol(sym2, from);
+    if(asus_save_stack && (asus_strace->max_entries > asus_strace->nr_entries))
+        asus_strace->entries[asus_strace->nr_entries++] = where;
+    else
+    //ASUSDEBUG -
 	printk("[<%08lx>] (%pS) from [<%08lx>] (%pS)\n", where, (void *)where, from, (void *)from);
 #else
 	printk("Function entered at [<%08lx>] from [<%08lx>]\n", where, from);
@@ -204,7 +216,15 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		c_backtrace(fp, mode);
 }
 #endif
-
+//ASUSDEBUG + jeffery_hu@asus.com
+void save_stack_trace_asus(struct task_struct *tsk, struct stack_trace *trace)
+{
+    asus_save_stack = 1;
+    asus_strace = trace;
+    unwind_backtrace(NULL, tsk);
+    asus_save_stack = 0;
+}
+//ASUSDEBUG -
 void dump_stack(void)
 {
 	dump_backtrace(NULL, NULL);
@@ -268,10 +288,16 @@ static DEFINE_RAW_SPINLOCK(die_lock);
 /*
  * This function is protected against re-entrancy.
  */
+ //ASUSDEBUG + jeffery_hu@asus.com
+#include <linux/reboot.h>
+//ASUSDEBUG -
 void die(const char *str, struct pt_regs *regs, int err)
 {
 	struct thread_info *thread = current_thread_info();
-	int ret;
+	//ASUSDEBUG + jeffery_hu@asus.com
+	int ret = 0;
+	char message[128];
+	//ASUSDEBUG -
 	enum bug_trap_type bug_type = BUG_TRAP_TYPE_NONE;
 
 	oops_enter();
@@ -279,26 +305,51 @@ void die(const char *str, struct pt_regs *regs, int err)
 	raw_spin_lock_irq(&die_lock);
 	console_verbose();
 	bust_spinlocks(1);
-	if (!user_mode(regs))
-		bug_type = report_bug(regs->ARM_pc, regs);
-	if (bug_type != BUG_TRAP_TYPE_NONE)
-		str = "Oops - BUG";
-	ret = __die(str, err, thread, regs);
-
+	//ASUSDEBUG + jeffery_hu@asus.com
+	if (regs != NULL)
+	{
+		if (!user_mode(regs))
+			bug_type = report_bug(regs->ARM_pc, regs);
+		if (bug_type != BUG_TRAP_TYPE_NONE)
+			str = "Oops - BUG";
+		ret = __die(str, err, thread, regs);
+	}
+	//ASUSDEBUG -
 	if (regs && kexec_should_crash(thread->task))
+	//ASUSDEBUG + jeffery_hu@asus.com
+	{
+		if (regs != NULL)
 		crash_kexec(regs);
-
+	}
+	//ASUSDEBUG -
 	bust_spinlocks(0);
 	add_taint(TAINT_DIE);
 	raw_spin_unlock_irq(&die_lock);
 	oops_exit();
 
 	if (in_interrupt())
-		panic("Fatal exception in interrupt");
+	//ASUSDEBUG + jeffery_hu@asus.com
+    {
+        sprintf(message, "DIE:in int %s", str);
+        panic(message);
+        
+    }
+    //ASUSDEBUG -
 	if (panic_on_oops)
-		panic("Fatal exception");
-	if (ret != NOTIFY_STOP)
-		do_exit(SIGSEGV);
+	//ASUSDEBUG + jeffery_hu@asus.com
+    {
+        sprintf(message, "DIE :%s", str);
+        panic(message);
+        
+    }
+    if (regs != NULL)
+	{
+	//ASUSDEBUG -
+		if (ret != NOTIFY_STOP)
+			do_exit(SIGSEGV);
+	//ASUSDEBUG + jeffery_hu@asus.com
+	}
+	//ASUSDEBUG -
 }
 
 void arm_notify_die(const char *str, struct pt_regs *regs,

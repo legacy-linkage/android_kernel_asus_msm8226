@@ -101,7 +101,10 @@ enum {
 	BINDER_DEBUG_BUFFER_ALLOC_ASYNC     = 1U << 15,
 	BINDER_DEBUG_TOP_ERRORS		    = 1U << 16,
 };
-static uint32_t binder_debug_mask;
+//ASUSDEBUG + jeffery_hu@asus.com
+static uint32_t binder_debug_mask = BINDER_DEBUG_USER_ERROR |
+	BINDER_DEBUG_FAILED_TRANSACTION | BINDER_DEBUG_DEAD_TRANSACTION;
+//ASUSDEBUG -
 module_param_named(debug_mask, binder_debug_mask, uint, S_IWUSR | S_IRUGO);
 
 static bool binder_debug_no_lock;
@@ -657,7 +660,7 @@ static int binder_update_page_range(struct binder_proc *proc, int allocate,
 		page = &proc->pages[(page_addr - proc->buffer) / PAGE_SIZE];
 
 		BUG_ON(*page);
-		*page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+		*page = alloc_page(GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO);//ASUSDEBUG jeffery_hu@asus.com
 		if (*page == NULL) {
 			binder_debug(BINDER_DEBUG_TOP_ERRORS,
 				     "binder: %d: binder_alloc_buf failed "
@@ -2876,7 +2879,10 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct binder_proc *proc = filp->private_data;
 	const char *failure_string;
 	struct binder_buffer *buffer;
-
+	//ASUSDEBUG + jeffery_hu@asus.com
+	if (proc->tsk != current)
+		return -EINVAL;
+	//ASUSDEBUG -
 	if ((vma->vm_end - vma->vm_start) > SZ_4M)
 		vma->vm_end = vma->vm_start + SZ_4M;
 
@@ -2942,7 +2948,7 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 	binder_insert_free_buffer(proc, buffer);
 	proc->free_async_space = proc->buffer_size / 2;
 	barrier();
-	proc->files = get_files_struct(proc->tsk);
+	proc->files = get_files_struct(current);//ASUSDEBUG jeffery_hu@asus.com
 	proc->vma = vma;
 	proc->vma_vm_mm = vma->vm_mm;
 

@@ -219,6 +219,108 @@ static ssize_t pm_test_store(struct kobject *kobj, struct kobj_attribute *attr,
 power_attr(pm_test);
 #endif /* CONFIG_PM_DEBUG */
 
+// ASUS_BSP+++ jojo_zhou "Fast boot mode"
+#ifdef CONFIG_FASTBOOT
+#include <linux/fastboot.h>
+#include <linux/wakelock.h>
+
+const char const fastboot_states[]="fastboot";
+static bool gb_in_fastboot_mode= false;
+static bool gb_ready_to_wake_up= false;
+static struct wake_lock fastboot_wake_lock;
+bool is_fastboot_enable(void)
+{
+    return (gb_in_fastboot_mode);
+}
+void ready_to_wake_up_in_fastboot(void)
+{
+    static bool init_wake_lock = false;
+
+    if(false == init_wake_lock){
+
+        wake_lock_init(&fastboot_wake_lock, WAKE_LOCK_SUSPEND, "fastboot");
+
+        init_wake_lock = true;
+    }
+
+    wake_lock_timeout(&fastboot_wake_lock, 5 * HZ);
+
+    printk("[FastBoot]Wake up from fastboot\n");
+    gb_ready_to_wake_up = true;
+}
+void ready_to_wake_up_and_send_power_key_press_event_in_fastboot(void)
+{
+    ready_to_wake_up_in_fastboot();
+
+    send_fake_power_key_event(true);
+
+    send_fake_power_key_event(false);
+}
+
+static ssize_t fastboot_wakeup_show(struct kobject *kobj, struct kobj_attribute *attr,
+				char *buf)
+{
+	return sprintf(buf, "%d\n", gb_ready_to_wake_up);
+}
+
+static ssize_t fastboot_wakeup_store(struct kobject *kobj, struct kobj_attribute *attr,
+				const char *buf, size_t n)
+{
+	char *p;
+	int len;
+
+	p = memchr(buf, '\n', n);
+
+	len = p ? p - buf : n;
+
+	return 0;
+}
+
+power_attr(fastboot_wakeup);
+
+
+static ssize_t fastboot_show(struct kobject *kobj, struct kobj_attribute *attr,
+				char *buf)
+{
+	return sprintf(buf, "%d\n", gb_in_fastboot_mode);
+}
+
+static ssize_t fastboot_store(struct kobject *kobj, struct kobj_attribute *attr,
+				const char *buf, size_t n)
+{
+	char *p;
+	int len;
+	int error = -EINVAL;
+
+	p = memchr(buf, '\n', n);
+	len = p ? p - buf : n;
+
+	mutex_lock(&pm_mutex);
+
+       if(!strncmp(buf, "0", len)){
+
+            gb_in_fastboot_mode = false;
+
+       }else{
+
+            gb_in_fastboot_mode = true;
+       }
+
+       gb_ready_to_wake_up = false;
+
+       error = 0;
+
+	mutex_unlock(&pm_mutex);
+
+	return error ? error : n;
+}
+
+power_attr(fastboot);
+
+
+#endif //#ifdef CONFIG_FASTBOOT
+// ASUS_BSP--- jojo_zhou "Fast boot mode"
+
 #ifdef CONFIG_DEBUG_FS
 static char *suspend_step_name(enum suspend_stat_step step)
 {
@@ -631,6 +733,12 @@ static struct attribute *g[] = {
 	&wake_lock_attr.attr,
 	&wake_unlock_attr.attr,
 #endif
+// ASUS_BSP+++ jojo_zhou "Fast boot mode"
+#ifdef CONFIG_FASTBOOT
+       &fastboot_wakeup_attr.attr,
+       &fastboot_attr.attr,
+#endif //#ifdef CONFIG_FASTBOOT
+// ASUS_BSP--- jojo_zhou "Fast boot mode"
 #endif
 	NULL,
 };

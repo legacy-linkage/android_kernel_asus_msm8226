@@ -1115,6 +1115,9 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		}
 	}
 
+// ASUS BSP +++ Allen_Zhuang : Add sd_status for ATD  when power on
+	host->sd_status = 1;
+// ASUS BSP --- Allen_Zhuang : Add sd_status for ATD  when power on
 	return 0;
 
 free_card:

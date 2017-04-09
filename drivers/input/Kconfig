@@ -117,6 +117,13 @@ config INPUT_MOUSEDEV_SCREEN_Y
 	  screen resolution you are using to correctly scale the data. If
 	  you're not using a digitizer, this value is ignored.
 
+config INPUT_HALL_SENSOR
+  tristate "Hall sensor detect"
+  depends on INPUT
+  ---help---
+  Say Y here to enable hall sensor;
+  To compile this driver as a module, choose M here.
+
 config INPUT_JOYDEV
 	tristate "Joystick interface"
 	help

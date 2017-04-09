@@ -24,6 +24,8 @@
 
 #include "mdss_dsi.h"
 
+#include "mdss_asus_debug.h"
+
 #define DT_CMD_HDR 6
 
 #define MIN_REFRESH_RATE 30
@@ -98,11 +100,20 @@ static void mdss_dsi_panel_bklt_pwm(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 }
 
 static char dcs_cmd[2] = {0x54, 0x00}; /* DTYPE_DCS_READ */
+#if defined(ASUS_A500KL_PROJECT)
+
+static struct dsi_cmd_desc dcs_read_cmd = {
+	{DTYPE_GEN_READ, 1, 0, 1, 5, sizeof(dcs_cmd)},
+	dcs_cmd
+};
+#else
+
 static struct dsi_cmd_desc dcs_read_cmd = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(dcs_cmd)},
 	dcs_cmd
 };
 
+#endif
 u32 mdss_dsi_panel_cmd_read(struct mdss_dsi_ctrl_pdata *ctrl, char cmd0,
 		char cmd1, void (*fxn)(int), char *rbuf, int len)
 {

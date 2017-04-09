@@ -915,6 +915,8 @@ static int init_smem_remote_spinlock(void)
 	return rc;
 }
 
+extern int get_ssr_enable_ramdumps(void);//ASUS-BBSP Save SSR reason+
+
 /**
  * smem_initialized_check - Reentrant check that smem has been initialized
  *
@@ -997,7 +999,7 @@ static int restart_notifier_cb(struct notifier_block *this,
 		remote_spin_release(&remote_spinlock, notifier->processor);
 		remote_spin_release_all(notifier->processor);
 
-		if (smem_ramdump_dev) {
+		if (smem_ramdump_dev && get_ssr_enable_ramdumps()) {//ASUS-BBSP Save SSR reason+
 			int ret;
 
 			SMEM_DBG("%s: saving ramdump\n", __func__);

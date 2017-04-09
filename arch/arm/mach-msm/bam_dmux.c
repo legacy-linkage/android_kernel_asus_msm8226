@@ -1653,6 +1653,7 @@ static int ssrestart_check(void)
 	DMUX_LOG_KERR("%s: modem timeout: BAM DMUX disabled for SSR\n",
 								__func__);
 	in_global_reset = 1;
+	subsys_save_reason("modem", "modem timeout: BAM DMUX disabled for SSR");//ASUS-BBSP Save SSR reason+
 	ret = subsystem_restart("modem");
 	if (ret == -ENODEV)
 		panic("modem subsystem restart failed\n");

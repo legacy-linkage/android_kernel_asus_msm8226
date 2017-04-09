@@ -26,6 +26,9 @@
 #include <linux/delay.h>
 #include <linux/regulator/consumer.h>
 #include <linux/delay.h>
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
+
 
 #define WLED_MOD_EN_REG(base, n)	(base + 0x60 + n*0x10)
 #define WLED_IDAC_DLY_REG(base, n)	(WLED_MOD_EN_REG(base, n) + 0x01)
@@ -224,6 +227,12 @@
 #define NUM_KPDBL_LEDS			4
 #define KPDBL_MASTER_BIT_INDEX		0
 
+#define ASUS_FLASH_BRIGHTNESS_PROC_FILE  "driver/asus_flash_brightness"
+#define ASUS_FLASH_BRIGHTNESS_FILE_PERMISSION  0664
+#define ASUS_FLASH_BRIGHTNESS_BUFF_SIZE 10
+
+struct led_classdev *flash_brightness_dev;
+
 /**
  * enum qpnp_leds - QPNP supported led ids
  * @QPNP_ID_WLED - White led backlight
@@ -279,6 +288,19 @@ enum led_mode {
 	LPG_MODE,
 	MANUAL_MODE,
 };
+
+static u32 res[6];
+static int div;
+static int shift;
+static int phone_min_value;
+static int phone_max_value;
+static int phone_dim_value;
+static int phone_min_index;
+static int phone_max_index;
+static int phone_default_index;
+static int phone_dim_index;
+static int calc_res = 100000;
+static int led_flag = 0;
 
 static u8 wled_debug_regs[] = {
 	/* common registers */
@@ -728,8 +750,45 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 			/*config pwm for brightness scaling*/
 			period_us = led->mpp_cfg->pwm_cfg->pwm_period_us;
 			if (period_us > INT_MAX / NSEC_PER_USEC) {
+
+				if(!strcmp(led->cdev.name, "wled-backlight"))
+				{
+				
+					if (shift < 0)
+						shift = 0;
+					
+					if (led->cdev.brightness == 0) {
+							printk("[BL] %s turn off Phone backlight\n",__func__);
+						led->cdev.brightness = 0;
+						}
+				
+					else if (led->cdev.brightness == phone_dim_value)
+						led->cdev.brightness = phone_dim_index; 
+					else if (led->cdev.brightness >= phone_max_value)
+							led->cdev.brightness = phone_max_index;
+					else if (led->cdev.brightness > 0 && led->cdev.brightness <= phone_min_value) 
+						led->cdev.brightness = phone_min_index;
+					else if (led->cdev.brightness > phone_min_value && led->cdev.brightness < phone_max_value) 
+						{
+							led->cdev.brightness = led->cdev.brightness*calc_res/div + shift;
+							if(led->cdev.brightness >= phone_max_index)
+								led->cdev.brightness = phone_max_index;
+						}
+					else {
+						printk("[BL] value (%d) not within spec, set to default brightness\n", led->cdev.brightness);
+						led->cdev.brightness = phone_default_index;
+					}
+				
+					duty_us = (led->mpp_cfg->pwm_cfg->pwm_period_us *
+							led->cdev.brightness) / 511;
+				}
+				else
+				{
+				
 				duty_us = (period_us * led->cdev.brightness) /
 					LED_FULL;
+				}
+				
 				rc = pwm_config_us(
 					led->mpp_cfg->pwm_cfg->pwm_dev,
 					duty_us,
@@ -839,7 +898,9 @@ static int qpnp_flash_regulator_operate(struct qpnp_led_data *led, bool on)
 
 	for (i = 0; i < led->num_leds; i++)
 		regulator_on |= led_array[i].flash_cfg->flash_on;
-
+	
+	pr_info("on: %d   regulator_on: %d \n",on,regulator_on);
+	
 	if (!on)
 		goto regulator_turn_off;
 
@@ -1500,6 +1561,12 @@ static int qpnp_rgb_set(struct qpnp_led_data *led)
 	return 0;
 }
 
+//ASUS_BSP +++ jeff_gu fix led blink failure
+static int qpnp_pwm_init(struct pwm_config_data *pwm_cfg,
+					struct spmi_device *spmi_dev,
+					const char *name);
+//ASUS_BSP --- jeff_gu fix led blink failure
+
 static void qpnp_led_set(struct led_classdev *led_cdev,
 				enum led_brightness value)
 {
@@ -1515,6 +1582,18 @@ static void qpnp_led_set(struct led_classdev *led_cdev,
 		value = led->cdev.max_brightness;
 
 	led->cdev.brightness = value;
+
+//ASUS_BSP +++ jeff_gu fix led blink failure
+	if(led->id == QPNP_ID_LED_MPP)
+	{
+		if(led->mpp_cfg->pwm_mode != MANUAL_MODE)
+		{
+			pwm_free(led->mpp_cfg->pwm_cfg->pwm_dev);
+			qpnp_pwm_init(led->mpp_cfg->pwm_cfg, led->spmi_dev, led->cdev.name);
+		}
+	}
+//ASUS_BSP --- jeff_gu fix led blink failure
+
 	if (led->in_order_command_processing)
 		queue_work(led->workqueue, &led->work);
 	else
@@ -1623,7 +1702,7 @@ static enum led_brightness qpnp_led_get(struct led_classdev *led_cdev)
 	struct qpnp_led_data *led;
 
 	led = container_of(led_cdev, struct qpnp_led_data, cdev);
-
+	printk("%s: name %s brightness %d\n",__func__,led_cdev->name,led->cdev.brightness);
 	return led->cdev.brightness;
 }
 
@@ -1808,6 +1887,48 @@ static ssize_t led_mode_store(struct device *dev,
 
 	return count;
 }
+
+//ASUS_BSP +++ surya_xu "Add for Camera ATD Test"
+static ssize_t asus_flash_led_test(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct qpnp_led_data *led;
+	unsigned long state;
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	ssize_t ret = -EINVAL;
+	int rc;
+
+	ret = kstrtoul(buf, 10, &state);
+	if (ret)
+		return ret;
+
+	led = container_of(led_cdev, struct qpnp_led_data, cdev);
+
+	if (state == 1) {
+		led->flash_cfg->torch_enable = true;
+		led->max_current = 200;
+		led->flash_cfg->enable_module = 224;
+		led->flash_cfg->trigger_flash = 192;
+		led->flash_cfg->current_addr = 54082;
+		led->flash_cfg->second_addr = 54083;
+		led->cdev.brightness = 200;
+	} else if (state == 0) {
+		led->flash_cfg->torch_enable = false;
+		led->max_current = 1000;
+		led->flash_cfg->enable_module = 192;
+		led->flash_cfg->trigger_flash = 128;
+		led->flash_cfg->current_addr = 54082;
+		led->flash_cfg->second_addr = 0;
+		led->cdev.brightness = 800;
+	} else {
+		led->cdev.brightness = 0;
+	}
+	rc = qpnp_flash_set(led);
+	return count;
+
+}
+//ASUS_BSP --- surya_xu "Add for Camera ATD Test"
 
 static ssize_t led_strobe_type_store(struct device *dev,
 			struct device_attribute *attr,
@@ -2408,9 +2529,17 @@ static DEVICE_ATTR(lut_flags, 0664, NULL, lut_flags_store);
 static DEVICE_ATTR(duty_pcts, 0664, NULL, duty_pcts_store);
 static DEVICE_ATTR(blink, 0664, NULL, blink_store);
 
+//ASUS_BSP +++ surya_xu "Add for Camera ATD Test"
+static DEVICE_ATTR(flash_led_test, 0664, NULL, asus_flash_led_test);
+//ASUS_BSP --- surya_xu "Add for Camera ATD Test"
+
+
 static struct attribute *led_attrs[] = {
 	&dev_attr_led_mode.attr,
 	&dev_attr_strobe.attr,
+	//ASUS_BSP +++ surya_xu "Add for Camera ATD Test"
+	&dev_attr_flash_led_test.attr,
+	//ASUS_BSP --- surya_xu "Add for Camera ATD Test"
 	NULL
 };
 
@@ -2692,6 +2821,17 @@ static int __devinit qpnp_mpp_init(struct qpnp_led_data *led)
 			"Failed to write sink control reg\n");
 		return rc;
 	}
+
+//ASUS_BSP+++ jeff_gu factory build close sbl led in driver probe
+#ifdef ASUS_FACTORY_BUILD
+	if(!strcmp(led->cdev.name, "green") || !strcmp(led->cdev.name, "red"))
+	{
+		qpnp_led_masked_write(led, LED_MPP_EN_CTRL(led->base),
+		LED_MPP_EN_MASK, 0);
+	}
+#endif
+//ASUS_BSP--- jeff_gu factory build close sbl led in driver probe
+
 
 	if (led->mpp_cfg->pwm_mode != MANUAL_MODE) {
 		rc = qpnp_pwm_init(led->mpp_cfg->pwm_cfg, led->spmi_dev,
@@ -3401,6 +3541,8 @@ static int __devinit qpnp_get_config_mpp(struct qpnp_led_data *led,
 	return 0;
 }
 
+static void flash_brightness_create_proc_file(void);
+
 static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 {
 	struct qpnp_led_data *led, *led_array;
@@ -3413,7 +3555,7 @@ static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 	node = spmi->dev.of_node;
 	if (node == NULL)
 		return -ENODEV;
-
+	printk("%s E\n",__func__);
 	temp = NULL;
 	while ((temp = of_get_next_child(node, temp)))
 		num_leds++;
@@ -3450,11 +3592,47 @@ static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 
 		rc = of_property_read_string(temp, "linux,name",
 			&led->cdev.name);
+		   printk("%s: label %s name %s\n",__func__,led_label,led->cdev.name);
+
+		   if (strncmp(led->cdev.name, "led:flash_torch", sizeof("led:flash_torch"))== 0){
+				   printk("This is %s\n",led->cdev.name);
+				   flash_brightness_dev = &(led->cdev);
+				   flash_brightness_create_proc_file();
+		   }
+
 		if (rc < 0) {
 			dev_err(&led->spmi_dev->dev,
 				"Failure reading led name, rc = %d\n", rc);
 			goto fail_id_check;
 		}
+
+
+		if(!strcmp(led->cdev.name, "wled-backlight")){
+		
+			rc = of_property_read_u32_array(temp, "value", res, 3);
+			if (rc) {
+				pr_err("%s:%d, value not specified\n",__func__, __LINE__);
+				return -EINVAL;
+			}
+			phone_min_value = (!rc ? res[0] : 17);
+			phone_max_value = (!rc ? res[1] : 255);
+			phone_dim_value = (!rc ? res[2] : 10);
+		
+			
+			rc = of_property_read_u32_array(temp, "phone-bl-param", res, 4);
+			if (rc) {
+				pr_err("%s:%d, phone-bl-param not specified\n",__func__, __LINE__);
+				return -EINVAL;
+			}
+			phone_min_index = (!rc ? res[0] : 1);
+			phone_max_index = (!rc ? res[1] : 255);
+			phone_default_index = (!rc ? res[2] : 255);
+			phone_dim_index= (!rc ? res[3] : 10);
+		
+			div = ((phone_max_value-phone_min_value)*calc_res/(phone_max_index-phone_min_index));
+			shift = phone_min_index -phone_min_value*calc_res/div;
+		}
+
 
 		rc = of_property_read_u32(temp, "qcom,max-current",
 			&led->max_current);
@@ -3653,6 +3831,8 @@ static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 		/* configure default state */
 		if (led->default_on) {
 			led->cdev.brightness = led->cdev.max_brightness;
+				if(!strcmp(led->cdev.name, "wled-backlight"))
+					led->cdev.brightness = 30;
 			__qpnp_led_work(led, led->cdev.brightness);
 			if (led->turn_off_delay_ms > 0)
 				qpnp_led_turn_off(led);
@@ -3662,6 +3842,8 @@ static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 		parsed_leds++;
 	}
 	dev_set_drvdata(&spmi->dev, led_array);
+
+       printk("%s X\n",__func__);
 	return 0;
 
 fail_id_check:
@@ -3760,6 +3942,98 @@ static int __devexit qpnp_leds_remove(struct spmi_device *spmi)
 	}
 
 	return 0;
+}
+
+static ssize_t asus_flash_brightness_read_proc(char *page, char **start, off_t off, int count,
+	int *eof, void *data)
+{
+	struct led_classdev *led_cdev = flash_brightness_dev;
+	printk("%s E\n",__func__);
+
+	if (led_cdev->brightness_get)
+		led_cdev->brightness = led_cdev->brightness_get(led_cdev);
+	printk("%s X:name %s brightness %d\n",__func__,led_cdev->name,led_cdev->brightness / 2);
+	return snprintf(page, 10, "%d\n", led_cdev->brightness / 2);
+}
+
+static ssize_t asus_flash_brightness_write_proc(struct file *filp, const char __user *buff,
+	unsigned long len, void *data)
+{
+	unsigned long state;
+	char buf[5];
+	//int rc = 0;
+	int ret = 0;
+	struct qpnp_led_data *led;
+	struct led_classdev *led_cdev = flash_brightness_dev;
+	printk("%s: name %s \n",__func__,led_cdev->name);
+	led = container_of(led_cdev, struct qpnp_led_data,cdev);
+
+	if (len > 5)
+		len = 5;
+	if(copy_from_user(buf,buff,len))
+		return -EFAULT;
+
+	if(buf[len] != 0)
+		buf[len] = 0;
+	ret = kstrtoul(buf, 10, &state);
+	if (ret)
+		return ret;
+
+	printk("%s brightness state : %ld\n",__func__,state);
+
+	state = state * 2;
+
+	if(state > 200)
+		state = 200;
+
+	if(state > 0){
+		led_flag++;
+		if(led_flag == 1){
+			led->flash_cfg->torch_enable = true;
+			led->max_current = 200;
+			led->flash_cfg->enable_module = 224;
+			led->flash_cfg->trigger_flash = 192;
+			led->flash_cfg->current_addr = 54082;
+			led->flash_cfg->second_addr = 54083;
+			led->cdev.brightness = state;
+		}else{
+			led->flash_cfg->torch_enable = false;
+			led->cdev.brightness = 0;
+			schedule_work(&led->work);
+			led->flash_cfg->torch_enable = true;
+			led->max_current = 200;
+			led->flash_cfg->enable_module = 224;
+			led->flash_cfg->trigger_flash = 192;
+			led->flash_cfg->current_addr = 54082;
+			led->flash_cfg->second_addr = 54083;
+			led->cdev.brightness = state;
+		}
+	}else if(state == 0){
+		led_flag = 0;
+		led->cdev.brightness = 0;
+	}
+	schedule_work(&led->work);
+	printk("%s X\n",__func__);
+	return len;
+}
+
+static struct proc_dir_entry *flash_brightness_proc_file = NULL;
+
+static void flash_brightness_create_proc_file(void)
+{
+	flash_brightness_proc_file = create_proc_entry(
+		ASUS_FLASH_BRIGHTNESS_PROC_FILE,
+		ASUS_FLASH_BRIGHTNESS_FILE_PERMISSION,
+		NULL);
+
+	if (NULL == flash_brightness_proc_file) {
+		printk(KERN_ERR "flash brightness file proc file created failed!\n");
+		return;
+	}
+
+	flash_brightness_proc_file->read_proc = asus_flash_brightness_read_proc;
+	flash_brightness_proc_file->write_proc = asus_flash_brightness_write_proc;
+	return;
 }
 
 #ifdef CONFIG_OF

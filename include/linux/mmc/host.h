@@ -412,6 +412,13 @@ struct mmc_host {
 	} perf;
 	bool perf_enable;
 #endif
+	unsigned int sd_status; //ASUS_BSP +++ Allen_Zhuang "sd status for ATD"
+//ASUS_BSP +++ Lei_Guo "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+	bool cmd5test;
+	unsigned int sleepcnt;
+#endif
+//ASUS_BSP --- Lei_Guo "cmd5 stress test"
 	struct mmc_ios saved_ios;
 	struct {
 		unsigned long	busy_time_us;

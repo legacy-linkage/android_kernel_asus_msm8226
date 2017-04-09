@@ -57,7 +57,7 @@ static ssize_t led_brightness_store(struct device *dev,
 	if (count == size) {
 		ret = count;
 
-		if (state == LED_OFF)
+		if (state == LED_OFF && strncmp(led_cdev->name, "led:flash", 9)) //ASUS_BSP Kyle do not remove trigger when set torch brightness to 0
 			led_trigger_remove(led_cdev);
 		led_set_brightness(led_cdev, state);
 	}

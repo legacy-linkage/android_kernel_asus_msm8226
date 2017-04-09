@@ -20,6 +20,10 @@
 static inline void mutex_set_owner(struct mutex *lock)
 {
 	lock->owner = current;
+	if(current != NULL)
+	{
+		lock->mutex_owner_asusdebug = current;//ASUSDEBUG jeffery_hu@asus.com
+	}
 }
 
 static inline void mutex_clear_owner(struct mutex *lock)

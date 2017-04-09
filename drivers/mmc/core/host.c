@@ -686,10 +686,84 @@ static DEVICE_ATTR(perf, S_IRUGO | S_IWUSR,
 
 #endif
 
+
+//ASUS_BSP +++ Lei_Guo "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+static ssize_t
+show_sleepcnt(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+	BUG_ON(!host);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", host->sleepcnt);
+}
+
+static DEVICE_ATTR(sleepcnt, S_IRUGO | S_IWUSR,
+		show_sleepcnt, NULL);
+
+static ssize_t
+show_cmd5test(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+	BUG_ON(!host);
+
+	if (host->cmd5test)
+		return snprintf(buf, PAGE_SIZE, "cmd5test enabled\n");
+	else
+		return snprintf(buf, PAGE_SIZE, "cmd5test disabled\n");
+}
+
+static ssize_t
+set_cmd5test(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	int64_t value;
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+
+	BUG_ON(!host);	
+
+	sscanf(buf, "%lld", &value);
+	spin_lock(&host->lock);
+	if (!value) {
+		host->cmd5test = false;
+	} else {
+		host->cmd5test = true;
+	}
+	spin_unlock(&host->lock);
+
+	return count;
+}
+
+static DEVICE_ATTR(cmd5test, S_IRUGO | S_IWUSR,
+		show_cmd5test, set_cmd5test);
+#endif
+//ASUS_BSP --- Lei_Guo "cmd5 stress test"
+
+//ASUS_BSP +++ Allen_Zhuang "sd status for ATD"
+static ssize_t
+		show_sdstatus(struct device *dev, struct device_attribute *attr, char *buf)
+{
+       struct mmc_host *host = cls_dev_to_mmc_host(dev);
+       BUG_ON(!host);
+
+       return snprintf(buf, PAGE_SIZE, "%d\n", host->sd_status);
+}
+static DEVICE_ATTR(sd_status, S_IRUGO | S_IWUSR,
+       show_sdstatus, NULL);
+//ASUS_BSP --- Allen_Zhuang "sd status for ATD"
+
+
 static struct attribute *dev_attrs[] = {
 #ifdef CONFIG_MMC_PERF_PROFILING
 	&dev_attr_perf.attr,
 #endif
+	&dev_attr_sd_status.attr, //ASUS_BSP +++ Allen_Zhuang "sd status for ATD"
+//ASUS_BSP +++ Lei_Guo "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+	&dev_attr_cmd5test.attr,
+	&dev_attr_sleepcnt.attr,
+#endif
+//ASUS_BSP --- Lei_Guo "cmd5 stress test"
 	NULL,
 };
 static struct attribute_group dev_attr_grp = {

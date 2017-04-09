@@ -69,6 +69,9 @@ enum usb_mode_type {
 	USB_PERIPHERAL,
 	USB_HOST,
 	USB_OTG,
+	//ASUS_BSP+++ Eric5_Ou "add usb otg mode switch support"
+	USB_AUTO,
+	//ASUS_BSP--- Eric5_Ou "add usb otg mode switch support"
 };
 
 /**
@@ -489,6 +492,9 @@ struct msm_otg {
 	int ui_enabled;
 	bool pm_done;
 	struct qpnp_vadc_chip	*vadc_dev;
+	//ASUS_BSP+++ Eric5_Ou "add usb otg mode switch support"
+	enum usb_mode_type otg_mode;
+	//ASUS_BSP--- Eric5_Ou "add usb otg mode switch support"
 };
 
 struct ci13xxx_platform_data {

@@ -26,7 +26,7 @@
 #include "mdss_panel.h"
 #include "mdss_dsi.h"
 #include "mdss_debug.h"
-
+#include "mdss_asus_debug.h"
 static int mdss_dsi_regulator_init(struct platform_device *pdev)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;

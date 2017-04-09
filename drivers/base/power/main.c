@@ -357,6 +357,8 @@ static void pm_dev_err(struct device *dev, pm_message_t state, char *info,
 {
 	printk(KERN_ERR "PM: Device %s failed to %s%s: error %d\n",
 		dev_name(dev), pm_verb(state.event), info, error);
+	ASUSEvtlog( "[PM] Device %s failed to %s%s: error %d\n",
+		dev_name(dev), pm_verb(state.event), info, error);
 }
 
 static void dpm_show_time(ktime_t starttime, pm_message_t state, char *info)
@@ -371,9 +373,11 @@ static void dpm_show_time(ktime_t starttime, pm_message_t state, char *info)
 	usecs = usecs64;
 	if (usecs == 0)
 		usecs = 1;
-	pr_info("PM: %s%s%s of devices complete after %ld.%03ld msecs\n",
+/*
+	ASUSEvtlog("PM: %s%s%s of devices complete after %ld.%03ld msecs\n",
 		info ?: "", info ? " " : "", pm_verb(state.event),
 		usecs / USEC_PER_MSEC, usecs % USEC_PER_MSEC);
+*/
 }
 
 static int dpm_run_callback(pm_callback_t cb, struct device *dev,
@@ -1082,6 +1086,7 @@ static int __device_suspend(struct device *dev, pm_message_t state, bool async)
 
 	if (pm_wakeup_pending()) {
 		async_error = -EBUSY;
+		printk(KERN_ERR "[PM]%s: Device %s cause pm_wakeup_pending(), async_error fail: code %d\n", __func__, dev_name(dev), async_error);
 		goto Complete;
 	}
 

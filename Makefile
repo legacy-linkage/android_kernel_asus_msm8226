@@ -644,6 +644,20 @@ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-goto.sh $(CC)), y)
 	KBUILD_CFLAGS += -DCC_HAVE_ASM_GOTO
 endif
 
+# add ASUS software version support
+ifneq ($(BUILD_NUMBER),)
+        KBUILD_CPPFLAGS += -DASUS_SW_VER=\"$(BUILD_NUMBER)\"
+else
+        KBUILD_CPPFLAGS += -DASUS_SW_VER=\"$(ASUS_BUILD_PROJECT)_ENG\"
+endif
+
+KBUILD_CPPFLAGS += -DASUS_A500KL_PROJECT=1
+KBUILD_CPPFLAGS += -DASUS_CHARGING_MODE=1
+KBUILD_CPPFLAGS += -DASUS_FACTORY_BUILD=1
+KBUILD_CPPFLAGS += -DASUS_SHIP_BUILD=1
+
+KBUILD_CPPFLAGS += -DASUS_USERDEBUG_BUILD=1
+
 # Add user supplied CPPFLAGS, AFLAGS and CFLAGS as the last assignments
 # But warn user when we do so
 warn-assign = \

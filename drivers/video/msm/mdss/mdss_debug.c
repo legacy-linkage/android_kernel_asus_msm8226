@@ -25,7 +25,7 @@
 #include "mdss_mdp.h"
 #include "mdss_mdp_hwio.h"
 #include "mdss_debug.h"
-
+#include "mdss_asus_debug.h"
 #define DEFAULT_BASE_REG_CNT 0x100
 #define GROUP_BYTES 4
 #define ROW_BYTES 16

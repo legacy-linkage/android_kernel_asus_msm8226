@@ -128,6 +128,312 @@ static char *static_command_line;
 static char *execute_command;
 static char *ramdisk_execute_command;
 
+//+++ ASUS_BSP : miniporting
+static DEVICE_HWID oem_hardware_id_val = HWID_UNKNOWN;
+static DEVICE_HW_PROJECT oem_hardware_project_val = HW_PROJECT_UNKNOWN;
+DEVICE_HWID g_ASUS_hwID=HWID_UNKNOWN;
+EXPORT_SYMBOL(g_ASUS_hwID);
+
+const DEVICE_HWID oem_hardware_id(void)
+{
+	return oem_hardware_id_val;
+}
+EXPORT_SYMBOL(oem_hardware_id);
+
+const DEVICE_HW_PROJECT oem_hardware_project(void)
+{
+	return oem_hardware_project_val;
+}
+EXPORT_SYMBOL(oem_hardware_project);
+
+static int set_hardware_id(char *str)
+{
+
+//#ifdef ASUS_A600KL_PROJECT
+	if ( strcmp("A600KL_EVB", str) == 0 )
+	{
+		oem_hardware_id_val = A600KL_EVB;
+		g_ASUS_hwID = A600KL_EVB;
+		printk("Kernel HW ID = A600KL_EVB\n");
+		oem_hardware_project_val = HW_PROJECT_A600KL;
+	}
+	else if ( strcmp("A600KL_EVB2", str) == 0 )
+	{
+		oem_hardware_id_val = A600KL_EVB2;
+		g_ASUS_hwID = A600KL_EVB2;
+		printk("Kernel HW ID = A600KL_EVB2\n");
+		oem_hardware_project_val = HW_PROJECT_A600KL;
+	}
+	else if ( strcmp("A500KL_EVB1", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_EVB1;
+		g_ASUS_hwID = A500KL_EVB1;
+		printk("Kernel HW ID = A500KL_EVB1\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else if ( strcmp("A500KL_SR", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_SR;
+		g_ASUS_hwID = A500KL_SR;
+		printk("Kernel HW ID = A500KL_SR\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else if ( strcmp("A500KL_SR2", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_SR2;
+		g_ASUS_hwID = A500KL_SR2;
+		printk("Kernel HW ID = A500KL_SR2\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else if ( strcmp("A500KL_ER1", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_ER1;
+		g_ASUS_hwID = A500KL_ER1;
+		printk("Kernel HW ID = A500KL_ER1\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else if ( strcmp("A500KL_ER2", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_ER2;
+		g_ASUS_hwID = A500KL_ER2;
+		printk("Kernel HW ID = A500KL_ER2\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else if ( strcmp("A500KL_ER3", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_ER3;
+		g_ASUS_hwID = A500KL_ER3;
+		printk("Kernel HW ID = A500KL_ER3\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else if ( strcmp("A500KL_MP", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_MP;
+		g_ASUS_hwID = A500KL_MP;
+		printk("Kernel HW ID = A500KL_MP\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else if ( strcmp("A500KL_MP2", str) == 0 )
+	{
+		oem_hardware_id_val = A500KL_MP2;
+		g_ASUS_hwID = A500KL_MP2;
+		printk("Kernel HW ID = A500KL_MP2\n");
+		oem_hardware_project_val = HW_PROJECT_A500KL;
+	}
+	else
+	{
+		oem_hardware_id_val = HWID_UNKNOWN;
+		g_ASUS_hwID = HWID_UNKNOWN;
+		printk("Kernel HW ID = HWID_UNKNOWN\n");
+		oem_hardware_project_val = HW_PROJECT_UNKNOWN;
+	}
+//#endif
+
+	printk("ASUS HW ID = %d\n", oem_hardware_id_val);
+	printk("g_ASUS_hwID = %d\n", g_ASUS_hwID);
+	printk("ASUS HW PROJECT = %d\n", oem_hardware_project_val);
+	return 0;
+}
+__setup("HW_ID=", set_hardware_id);
+//--- ASUS_BSP : miniporting
+
+
+static HW_DDR_TYPE oem_hardware_ddr_type_val = DDR_ID_UNKNOWN;
+static HW_DDR_SIZE oem_hardware_ddr_size_val = DDR_SIZE_UNKNOWN;
+
+static int set_hardware_ddr_info(char *str)
+{
+	int sep_pos = 0;
+	const char* sep = strchr(str, '-');
+	if(NULL == sep)
+		return 0;
+
+	sep_pos = sep - str;
+	if(strncmp("ELPIDA", str, sep_pos) == 0)
+	{
+		oem_hardware_ddr_type_val = DDR_ELPIDA;
+	}
+	else if(strncmp("HYNIX", str, sep_pos) == 0)
+	{
+		oem_hardware_ddr_type_val = DDR_HYNIX;
+	}
+	else if(strncmp("SAMSUNG", str, sep_pos) == 0)
+	{
+		oem_hardware_ddr_type_val = DDR_SAMSUNG;
+	}
+	else if(strncmp("HYNIX_LPDDR2", str, sep_pos) == 0)
+	{
+		oem_hardware_ddr_type_val = DDR_HYNIX_LPDDR2;
+	}
+
+	if(strcmp("-1G", sep) == 0)
+	{
+		oem_hardware_ddr_size_val = DDR_SIZE_1G;
+	}
+	else if(strcmp("-2G", sep) == 0)
+	{
+		oem_hardware_ddr_size_val = DDR_SIZE_2G;
+	}
+
+	printk("DDR_TYPE=%d DDR_SIZE=%d\n", oem_hardware_ddr_type_val, oem_hardware_ddr_size_val);
+
+    return 0;
+}
+__setup("DDR_TYPE=", set_hardware_ddr_info);
+
+const HW_DDR_TYPE oem_hardware_ddr_type(void)
+{
+	return oem_hardware_ddr_type_val;
+}
+EXPORT_SYMBOL(oem_hardware_ddr_type);
+
+const HW_DDR_SIZE oem_hardware_ddr_size(void)
+{
+	return oem_hardware_ddr_size_val;
+}
+EXPORT_SYMBOL(oem_hardware_ddr_size);
+
+static HW_MODEM_SKU oem_modem_sku_type_val = MODEM_SKU_MAX;
+
+void set_modem_sku_type_value(const HW_MODEM_SKU modem_sku)
+{
+	oem_modem_sku_type_val = modem_sku;
+	printk("MODEM_SKU=%d\n", oem_modem_sku_type_val);
+}
+
+static int set_modem_sku_type(char *str)
+{
+	if(strcmp("CN", str) == 0)
+	{
+		oem_modem_sku_type_val = MODEM_SKU_CN;
+	}
+	else if(strcmp("TW_APAC", str) == 0)
+	{
+		oem_modem_sku_type_val = MODEM_SKU_TW_APAC;
+	}
+	else if(strcmp("EU_WW", str) == 0)
+	{
+		oem_modem_sku_type_val = MODEM_SKU_EU_WW;
+	}
+	else if(strcmp("TAI", str) == 0)
+	{
+		oem_modem_sku_type_val = MODEM_SKU_TAI;
+	}
+
+	printk("MODEM_SKU=%d\n", oem_modem_sku_type_val);
+
+    return 0;
+}
+__setup("MODEM_SKU=", set_modem_sku_type);
+
+const HW_MODEM_SKU oem_modem_sku_type(void)
+{
+	return oem_modem_sku_type_val;
+}
+EXPORT_SYMBOL(oem_modem_sku_type);
+
+//+++ ASUS_BSP Jorney_dong: enable JB charger mode
+#if defined(ASUS_CHARGING_MODE) && !defined(ASUS_FACTORY_BUILD)
+int g_CHG_mode=0;
+static int set_chg_mode(char *str)
+{
+       if ( strcmp("charger", str) == 0 )
+       {
+               g_CHG_mode = 1;
+       }
+       else
+       {
+               g_CHG_mode = 0;
+       }
+       printk("JB charger mode = %d\n", g_CHG_mode);
+       return 0;
+}
+__setup("androidboot.mode=", set_chg_mode);
+#endif
+//+++ ASUS_BSP Jorney_dong: enable JB charger mode
+
+//ASUSDEBUG + jeffery_hu@asus.com Add for audio dbg mode
+int g_user_klog_mode = 0;
+EXPORT_SYMBOL(g_user_klog_mode);
+
+static int set_user_klog_mode(char *str)
+{
+    if ( strcmp("y", str) == 0 )
+    {
+        g_user_klog_mode = 1;
+    }
+    else
+    {
+        g_user_klog_mode = 0;
+    }
+
+    printk("Kernel log mode = %d\n", g_user_klog_mode);
+    return 0;
+}
+__setup("klog=", set_user_klog_mode);
+
+int g_user_dbg_mode = 0;
+EXPORT_SYMBOL(g_user_dbg_mode);
+
+static int set_user_dbg_mode(char *str)
+{
+    if ( strcmp("y", str) == 0 )
+    {
+        g_user_dbg_mode = 1;
+    }
+    else
+    {
+        g_user_dbg_mode = 0;
+    }
+
+    printk("Kernel dbg mode = %d\n", g_user_dbg_mode);
+    return 0;
+}
+__setup("dbg=", set_user_dbg_mode);
+//ASUSDEBUG -
+
+//add for UNLOCKED judgement ++++
+int unlocked_judgement = -1;
+EXPORT_SYMBOL(unlocked_judgement);
+
+static int set_unlocked_judgement(char *str)
+{
+    if ( strcmp("Y", str) == 0 )
+    {
+        unlocked_judgement = 1;
+    }
+    else
+    {
+        unlocked_judgement = 0;
+    }
+
+    printk("Kernel unlocked_judgement = %d\n", unlocked_judgement);
+    return 0;
+}
+__setup("UNLOCKED=", set_unlocked_judgement);
+//add for UNLOCKED judgement ----
+
+//add for SB judgement ++++
+int SB_judgement = -1;
+EXPORT_SYMBOL(SB_judgement);
+
+static int set_SB_judgement(char *str)
+{
+    if ( strcmp("Y", str) == 0 )
+    {
+        SB_judgement = 1;
+    }
+    else
+    {
+        SB_judgement = 0;
+    }
+
+    printk("Kernel SB_judgement = %d\n", SB_judgement);
+    return 0;
+}
+__setup("SB=", set_SB_judgement);
+//add for SB judgement ----
+
 /*
  * If set, this is an indication to the drivers that reset the underlying
  * device before going ahead with the initialization otherwise driver might

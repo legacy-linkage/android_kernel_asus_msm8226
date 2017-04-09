@@ -36,6 +36,20 @@
 #include <linux/of_gpio.h>
 #include <linux/qpnp/pin.h>
 
+//ASUS_BSP frank_tao +++
+#include <linux/asus_bat.h>
+#include <linux/asus_chg.h>
+#include "AXI_Basic_Define.h"
+//ASUS_BSP frank_tao ---
+
+//ASUS_BSP frank_tao +++
+#if defined(ASUS_CHARGING_MODE) && !defined(ASUS_FACTORY_BUILD)
+extern char g_CHG_mode;
+#endif
+extern bool AXC_BatteryService_IsFULL(void);
+extern bool SW_charging_enable;
+//ASUS_BSP frank_tao ---
+
 /* Interrupt offsets */
 #define INT_RT_STS(base)			(base + 0x10)
 #define INT_SET_TYPE(base)			(base + 0x11)
@@ -410,6 +424,17 @@ static struct of_device_id qpnp_charger_match_table[] = {
 	{ .compatible = QPNP_CHARGER_DEV_NAME, },
 	{}
 };
+//ASUS_BSP frank_tao +++
+static struct qpnp_chg_chip *the_chip = NULL;
+//static int api_get_prop_batt_volt(void);
+
+#ifdef CONFIG_PM_8226_CHARGER
+extern irqreturn_t PM8226_charger_in_out_handler(int irq, void *dev_id);
+extern void asus_fsm_chargingstop(AXE_Charging_Error_Reason reason);
+extern void asus_fsm_chargingstart(void);
+#endif
+bool qpnp_charger_probe_flag=false;
+//ASUS_BSP frank_tao ---
 
 enum bpd_type {
 	BPD_TYPE_BAT_ID,
@@ -1214,14 +1239,54 @@ qpnp_chg_usb_suspend_enable(struct qpnp_chg_chip *chip, int enable)
 			USB_SUSPEND_BIT,
 			enable ? USB_SUSPEND_BIT : 0, 1);
 }
-
+//ASUS_BSP frank_tao +++
+static int get_prop_batt_health(struct qpnp_chg_chip *chip); //ASUS_BSP Lenter +
+//ASUS_BSP frank_tao ---
 static int
 qpnp_chg_charge_en(struct qpnp_chg_chip *chip, int enable)
 {
+//ASUS_BSP frank_tao +++
+	int bat_health;
+//ASUS_BSP frank_tao ---
 	if (chip->insertion_ocv_uv == 0 && enable) {
 		pr_debug("Battery not present, skipping\n");
 		return 0;
 	}
+//ASUS_BSP frank_tao +++	
+	printk("qpnp_chg_charge_en: enable=%d\n", enable);
+
+
+	bat_health = get_prop_batt_health(chip);
+	if( (bat_health==POWER_SUPPLY_HEALTH_OVERHEAT) || (bat_health==POWER_SUPPLY_HEALTH_COLD) ){
+		printk("disable charge when battery is hot or cold\n");
+		enable = 0;
+	}
+
+
+#ifdef CONFIG_PM_8226_CHARGER
+	if(enable){
+#if defined(ASUS_A600KL_PROJECT) || defined(ASUS_A500KL_PROJECT)
+		if(SW_charging_enable)
+			asus_fsm_chargingstart();
+		else
+			{
+				printk("Asus SW need to close charger!\n");
+				enable = false;
+			}
+#else
+		asus_fsm_chargingstart();
+#endif
+	}
+	else{
+		if (chip->chg_done && qpnp_chg_is_boost_en_set(the_chip) == 0){
+			asus_fsm_chargingstop(CHARGING_DONE);
+		}
+		else{
+			asus_fsm_chargingstop(POWERBANK_STOP);
+		}
+	}
+#endif
+//ASUS_BSP frank_tao ---
 	pr_debug("charging %s\n", enable ? "enabled" : "disabled");
 	return qpnp_chg_masked_write(chip, chip->chgr_base + CHGR_CHG_CTRL,
 			CHGR_CHG_EN,
@@ -1237,7 +1302,12 @@ qpnp_chg_force_run_on_batt(struct qpnp_chg_chip *chip, int disable)
 	/* Don't force on battery if battery is not present */
 	if (!qpnp_chg_is_batt_present(chip))
 		return 0;
-
+//ASUS_BSP frank_tao +++	
+#ifdef CONFIG_PM_8226_CHARGER
+	if(disable == 1)
+	asus_fsm_chargingstop(POWERBANK_STOP);
+#endif
+//ASUS_BSP frank_tao ---
 	/* This bit forces the charger to run off of the battery rather
 	 * than a connected charger */
 	return qpnp_chg_masked_write(chip, chip->chgr_base + CHGR_CHG_CTRL,
@@ -1414,7 +1484,7 @@ qpnp_chg_usb_chg_gone_irq_handler(int irq, void *_chip)
 	if (rc)
 		pr_err("failed to read usb_chgpth_sts rc=%d\n", rc);
 
-	pr_debug("chg_gone triggered\n");
+	ASUSEvtlog("chg_gone triggered\n");
 	if ((qpnp_chg_is_usb_chg_plugged_in(chip)
 			|| qpnp_chg_is_dc_chg_plugged_in(chip))
 			&& (usb_sts & CHG_GONE_IRQ)) {
@@ -1716,7 +1786,7 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 
 	usb_present = qpnp_chg_is_usb_chg_plugged_in(chip);
 	host_mode = qpnp_chg_is_otg_en_set(chip);
-	pr_debug("usbin-valid triggered: %d host_mode: %d\n",
+	ASUSEvtlog("usbin-valid triggered: %d host_mode: %d\n",
 		usb_present, host_mode);
 
 	/* In host mode notifications cmoe from USB supply */
@@ -1787,7 +1857,11 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 		power_supply_set_present(chip->usb_psy, chip->usb_present);
 		schedule_work(&chip->batfet_lcl_work);
 	}
-
+//ASUS_BSP frank_tao +++
+	#ifdef CONFIG_PM_8226_CHARGER
+	PM8226_charger_in_out_handler(irq, chip);
+	#endif
+//ASUS_BSP frank_tao ---
 	return IRQ_HANDLED;
 }
 
@@ -1841,7 +1915,7 @@ qpnp_chg_bat_if_batt_temp_irq_handler(int irq, void *_chip)
 	int batt_temp_good, batt_present, rc;
 
 	batt_temp_good = qpnp_chg_is_batt_temp_ok(chip);
-	pr_debug("batt-temp triggered: %d\n", batt_temp_good);
+	pr_info("batt-temp triggered: %d\n", batt_temp_good);
 
 	batt_present = qpnp_chg_is_batt_present(chip);
 	if (batt_present) {
@@ -1876,7 +1950,7 @@ qpnp_chg_bat_if_batt_pres_irq_handler(int irq, void *_chip)
 	int batt_present, batt_temp_good, rc;
 
 	batt_present = qpnp_chg_is_batt_present(chip);
-	pr_debug("batt-pres triggered: %d\n", batt_present);
+	pr_info("batt-pres triggered: %d\n", batt_present);
 
 	if (chip->batt_present ^ batt_present) {
 		if (batt_present) {
@@ -1996,7 +2070,7 @@ qpnp_chg_chgr_chg_failed_irq_handler(int irq, void *_chip)
 	struct qpnp_chg_chip *chip = _chip;
 	int rc;
 
-	pr_debug("chg_failed triggered\n");
+	pr_info("chg_failed triggered\n");
 
 	rc = qpnp_chg_masked_write(chip,
 		chip->chgr_base + CHGR_CHG_FAILED,
@@ -2023,7 +2097,7 @@ qpnp_chg_chgr_chg_trklchg_irq_handler(int irq, void *_chip)
 {
 	struct qpnp_chg_chip *chip = _chip;
 
-	pr_debug("TRKL IRQ triggered\n");
+	pr_info("TRKL IRQ triggered\n");
 
 	chip->chg_done = false;
 	if (chip->bat_if_base) {
@@ -2081,7 +2155,7 @@ qpnp_chg_chgr_chg_fastchg_irq_handler(int irq, void *_chip)
 
 	fastchg_on = qpnp_chg_is_fastchg_on(chip);
 
-	pr_debug("FAST_CHG IRQ triggered, fastchg_on: %d\n", fastchg_on);
+	ASUSEvtlog("FAST_CHG IRQ triggered, fastchg_on: %d\n", fastchg_on);
 
 	if (chip->fastchg_on ^ fastchg_on) {
 		chip->fastchg_on = fastchg_on;
@@ -2595,6 +2669,8 @@ get_prop_capacity(struct qpnp_chg_chip *chip)
 	union power_supply_propval ret = {0,};
 	int battery_status, bms_status, soc, charger_in;
 
+	int asus_capacity = asus_bat_report_phone_capacity(100);
+
 	if (chip->fake_battery_soc >= 0)
 		return chip->fake_battery_soc;
 
@@ -2613,15 +2689,15 @@ get_prop_capacity(struct qpnp_chg_chip *chip)
 			qpnp_chg_is_dc_chg_plugged_in(chip);
 
 		if (battery_status != POWER_SUPPLY_STATUS_CHARGING
-				&& bms_status != POWER_SUPPLY_STATUS_CHARGING
+				//&& bms_status != POWER_SUPPLY_STATUS_CHARGING
 				&& charger_in
-				&& !chip->bat_is_cool
+				//&& !chip->bat_is_cool
 				&& !chip->bat_is_warm
 				&& !chip->resuming_charging
 				&& !chip->charging_disabled
 				&& chip->soc_resume_limit
-				&& soc <= chip->soc_resume_limit) {
-			pr_debug("resuming charging at %d%% soc\n", soc);
+				&& (soc <= chip->soc_resume_limit ||asus_capacity<=99)) {
+			pr_info("resuming charging at %d%% soc\n", soc);
 			chip->resuming_charging = true;
 			qpnp_chg_irq_wake_enable(&chip->chg_fastchg);
 			qpnp_chg_set_appropriate_vbatdet(chip);
@@ -2641,7 +2717,43 @@ get_prop_capacity(struct qpnp_chg_chip *chip)
 	 * from shutting down unecessarily */
 	return DEFAULT_CAPACITY;
 }
+//Eason: choose Capacity type SWGauge/BMS +++ 
+int get_BMS_capacity(void)
+{
+       int bms_soc;
+       //int adjust_bms_soc;
+       bms_soc = get_prop_capacity(the_chip);
 
+    /*  if(bms_soc>=80)
+       {
+               adjust_bms_soc = bms_soc+2;
+       }else if( (bms_soc<80)&&(bms_soc>=60) )
+       {
+               adjust_bms_soc = bms_soc+1;
+       }else
+       {
+               adjust_bms_soc = bms_soc;
+       }
+       
+       if(adjust_bms_soc>100)
+       {
+               adjust_bms_soc = 100;
+       }else if(adjust_bms_soc<0){
+               adjust_bms_soc = 0;
+       }       */
+
+       printk("[BAT][Bms]:%d\n", bms_soc);
+
+       return  bms_soc;
+}
+
+int get_BMS_SOC(void)
+{
+	int bms_soc;
+	bms_soc = get_prop_capacity(the_chip);
+	return bms_soc;
+}
+//Eason: choose Capacity type SWGauge/BMS ---
 #define DEFAULT_TEMP		250
 #define MAX_TOLERABLE_BATT_TEMP_DDC	680
 static int
@@ -2779,10 +2891,36 @@ qpnp_batt_power_get_property(struct power_supply *psy,
 {
 	struct qpnp_chg_chip *chip = container_of(psy, struct qpnp_chg_chip,
 								batt_psy);
-
+	//ASUS_BSP +++ Josh_Liao "add asus battery driver"
+#ifdef CONFIG_BATTERY_ASUS
+		enum asus_bat_charger_cable charger;
+		int bat_status;
+#endif /* CONFIG_BATTERY_ASUS */
+	//ASUS_BSP --- Josh_Liao "add asus battery driver"
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
-		val->intval = get_prop_batt_status(chip);
+				//ASUS_BSP +++ Josh_Liao "add asus battery driver"
+#ifdef CONFIG_BATTERY_ASUS
+				bat_status = get_prop_batt_status(chip);
+				// set charger here, not in ac/usb irq context
+				if (chip->usb_present) {
+					charger = ASUS_BAT_CHARGER_USB;
+				} else if (chip->dc_present) {
+					charger = ASUS_BAT_CHARGER_AC;
+				} else if (POWER_SUPPLY_STATUS_CHARGING == bat_status) {
+					// special case: inserted in p01
+					charger = ASUS_BAT_CHARGER_OTHER_BAT;
+				} else {
+					charger = ASUS_BAT_CHARGER_NONE;
+				}
+				asus_bat_report_phone_charger(charger);
+		
+				val->intval = asus_bat_report_phone_status(bat_status);
+		//printk("++++ POWER_SUPPLY_PROP_STATUS =%d\n",val->intval);
+#else
+				val->intval = get_prop_batt_status(chip);
+#endif /* CONFIG_BATTERY_ASUS */
+		//ASUS_BSP --- Josh_Liao "add asus battery driver"
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_TYPE:
 		val->intval = get_prop_charge_type(chip);
@@ -2818,7 +2956,16 @@ qpnp_batt_power_get_property(struct power_supply *psy,
 		val->intval = chip->warm_bat_decidegc;
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
-		val->intval = get_prop_capacity(chip);
+#ifdef CONFIG_BATTERY_ASUS
+		//ASUS_BSP Eason +++ get BMS capacity only in BatteryServiceGauge_OnCapacityReply  get_BMS_capacity(AXC_BatteryService.c)
+
+		val->intval = asus_bat_report_phone_capacity(100);
+		//ASUS_BSP Eason --- get BMS capacity only in BatteryServiceGauge_OnCapacityReply  get_BMS_capacity(AXC_BatteryService.c)
+		//asus_bat_write_phone_bat_capacity_tofile();
+
+#else
+ 		val->intval = get_prop_capacity(chip);
+#endif /* CONFIG_BATTERY_ASUS */	
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		val->intval = get_prop_current_now(chip);
@@ -2898,7 +3045,102 @@ qpnp_chg_bat_if_configure_btc(struct qpnp_chg_chip *chip)
 			chip->bat_if_base + BAT_IF_BTC_CTRL,
 			mask, btc_cfg, 1);
 }
+//ASUS_BSP +++ frank_tao "add asus battery driver"
+static struct qpnp_chg_chip *local_chip = NULL;
+//ASUS_BSP --- frank_tao "add asus battery driver"
 
+//ASUS_BSP frank_tao +++ 
+static void api_phone_bat_power_supply_changed(void)
+{
+	power_supply_changed(&local_chip->batt_psy);
+}
+
+static int api_get_prop_batt_present(void)
+{
+	return get_prop_batt_present(local_chip);
+}
+
+static int api_get_prop_batt_capacity(void)
+{
+	return get_prop_capacity(local_chip);
+}
+
+static int api_get_prop_batt_status(void)
+{
+	return get_prop_batt_status(local_chip);
+}
+
+
+static int api_get_prop_charge_type(void)
+{
+	return get_prop_charge_type(local_chip);
+
+}
+
+static int api_get_prop_batt_health(void)
+{
+	return get_prop_batt_health(local_chip);
+}
+
+static int api_get_prop_batt_volt(void)
+{
+	return get_prop_battery_voltage_now(local_chip);
+}
+
+static int api_get_prop_batt_curr(void)
+{
+	return get_prop_current_now(local_chip);
+}
+
+int get_temp_for_ASUSswgauge(void)
+{ 
+	if (the_chip == NULL){
+  		printk("[BAT][SWgauge]%s():the_chip == NULL",__FUNCTION__);
+        return 25;
+	}
+	else
+	{
+
+			return get_prop_batt_temp(the_chip)/10;
+
+	}
+}
+
+int get_voltage_for_ASUSswgauge(void)
+{ 
+  	if (the_chip == NULL){
+ 	 	printk("[BAT][SWgauge]%s():the_chip == NULL",__FUNCTION__);
+		return 3700;
+  	}
+  	else
+  	{
+
+			return get_prop_battery_voltage_now(the_chip)/1000;
+	
+	}		
+}
+
+int get_current_for_ASUSswgauge(void)
+{ 
+  	if (the_chip == NULL){
+  		printk("[BAT][SWgauge]%s():the_chip == NULL",__FUNCTION__);
+		return 500;
+  	}
+  	else
+  	{
+		return get_prop_current_now(the_chip)/1000;
+  	}		
+}
+void asus_bat_status_change(void)
+{
+       power_supply_changed(&the_chip->batt_psy);
+}
+
+
+void asus_chg_set_chg_mode_forBatteryservice(enum asus_chg_src Batteryservice_src)
+{
+}
+//ASUS_BSP frank_tao --- 
 #define QPNP_CHG_IBATSAFE_MIN_MA		100
 #define QPNP_CHG_IBATSAFE_MAX_MA		3250
 #define QPNP_CHG_I_STEP_MA		50
@@ -3733,7 +3975,9 @@ qpnp_chg_adjust_vddmax(struct qpnp_chg_chip *chip, int vbat_mv)
 	pr_debug("using delta_vddmax_mv = %d\n", chip->delta_vddmax_mv);
 	qpnp_chg_set_appropriate_vddmax(chip);
 }
-
+//ASUS_BSP Frank +++
+extern void AXC_BatteryService_forceReportCapacity(void);
+//ASUS_BSP Frank ---
 #define CONSECUTIVE_COUNT	3
 #define VBATDET_MAX_ERR_MV	50
 static void
@@ -3821,9 +4065,13 @@ qpnp_eoc_work(struct work_struct *work)
 			count = 0;
 		} else {
 			if (count == CONSECUTIVE_COUNT) {
-				if (!chip->bat_is_cool && !chip->bat_is_warm) {
+				//if (!chip->bat_is_cool && !chip->bat_is_warm) {
+				if (!chip->bat_is_warm) {
 					pr_info("End of Charging\n");
 					chip->chg_done = true;
+					//ASUS_BSP Frank +++
+					AXC_BatteryService_forceReportCapacity();
+					//ASUS_BSP Frank ---
 				} else {
 					pr_info("stop charging: battery is %s, vddmax = %d reached\n",
 						chip->bat_is_cool
@@ -5217,7 +5465,170 @@ qpnp_charger_read_dt_props(struct qpnp_chg_chip *chip)
 
 	return rc;
 }
+//ASUS_BSP frank_tao +++
+#ifdef CONFIG_PM_8226_CHARGER
+void pm8226_chg_enable_charging(bool enable)
+{
+	int rc;
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+	}
+	else
+		{
+			rc = qpnp_chg_charge_en(the_chip, enable);
+			if (rc) {
+				pr_err("Failed to control charging %d\n", rc);
+			}
+		}
+}
+EXPORT_SYMBOL(pm8226_chg_enable_charging);
 
+int pm8226_is_ac_usb_in(void)
+{	
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+		return 0;
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+	{
+		return qpnp_chg_is_usb_chg_plugged_in(the_chip);
+	}
+	else
+		return 0;
+}
+EXPORT_SYMBOL(pm8226_is_ac_usb_in);
+
+void pm8226_chg_usb_suspend_enable(int enable)
+{
+	printk("pm8226_chg_usb_suspend_enable, qpnp_chg_usb_suspend_enable, %d\n", enable);
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+	{
+		qpnp_chg_usb_suspend_enable(the_chip, enable);
+	}
+}
+EXPORT_SYMBOL(pm8226_chg_usb_suspend_enable);
+
+int pm8226_get_prop_batt_status(void)
+{
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+		return 0;
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+	{
+		return get_prop_batt_status(the_chip);
+	}
+	else
+		return 0;
+}
+EXPORT_SYMBOL(pm8226_get_prop_batt_status);
+
+int pm8226_get_prop_batt_temp(void)
+{
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+		return 0;
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+	{
+		return get_prop_batt_temp(the_chip);
+	}
+	else
+		return 0;
+}
+EXPORT_SYMBOL(pm8226_get_prop_batt_temp);
+
+int pm8226_get_prop_battery_voltage_now(void)
+{
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+		return 0;
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+	{
+		return get_prop_battery_voltage_now(the_chip);
+	}
+	else
+		return 0;
+}
+EXPORT_SYMBOL(pm8226_get_prop_battery_voltage_now);
+
+bool pm8226_is_full(void)
+{
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+		return 0;
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+	{
+		if ((qpnp_chg_is_usb_chg_plugged_in(the_chip) ||
+			qpnp_chg_is_dc_chg_plugged_in(the_chip)) && the_chip->chg_done
+			&& qpnp_chg_is_boost_en_set(the_chip) == 0) {
+			return true;
+		}
+		else{
+			return false;
+		}
+	}
+	else
+		return false;
+}
+EXPORT_SYMBOL(pm8226_is_full);
+
+int pm8226_get_prop_batt_health(void)
+{
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+		return 0;
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+		{
+			return get_prop_batt_health(the_chip);
+		}
+	else
+		return 0;
+}
+EXPORT_SYMBOL(pm8226_get_prop_batt_health);
+void pm8226_eoc_work(void)
+{
+	if(the_chip == NULL)
+	{
+		printk("[charger] the_chip null , skip!\n");
+	}
+	else
+		if(qpnp_charger_probe_flag == true)
+	{
+       	schedule_delayed_work(&the_chip->eoc_work, msecs_to_jiffies(10000));
+	}
+}
+EXPORT_SYMBOL(pm8226_eoc_work);
+#endif
+#if defined(ASUS_A600KL_PROJECT) || defined(ASUS_A500KL_PROJECT)
+extern void pm8226_register_usb(void);
+#endif
+//ASUS_BSP frank_tao ---
+int is_boost_enable(void)
+{
+	return qpnp_chg_is_boost_en_set(the_chip);
+}
 static int __devinit
 qpnp_charger_probe(struct spmi_device *spmi)
 {
@@ -5226,25 +5637,33 @@ qpnp_charger_probe(struct spmi_device *spmi)
 	struct resource *resource;
 	struct spmi_resource *spmi_resource;
 	int rc = 0;
-
+//ASUS_BSP +++ frank_tao "add asus battery driver"
+#ifdef CONFIG_BATTERY_ASUS
+	struct asus_bat_phone_bat_struct *phone_bat;
+	printk(DBGMSK_BAT_DEBUG "[BAT] %s() +++\n", __FUNCTION__);
+#endif /* CONFIG_BATTERY_ASUS */
+//ASUS_BSP --- frank_tao "add asus battery driver"
+//frank_tao porting remove charger_monitor service ++++
+	charger_monitor = 0;
+//frank_tao porting remove charger_monitor service ----
 	chip = devm_kzalloc(&spmi->dev,
 			sizeof(struct qpnp_chg_chip), GFP_KERNEL);
 	if (chip == NULL) {
 		pr_err("kzalloc() failed.\n");
 		return -ENOMEM;
 	}
-
+	the_chip = chip;
 	chip->prev_usb_max_ma = -EINVAL;
 	chip->fake_battery_soc = -EINVAL;
 	chip->dev = &(spmi->dev);
 	chip->spmi = spmi;
 
-	chip->usb_psy = power_supply_get_by_name("usb");
+	/*chip->usb_psy = power_supply_get_by_name("usb");
 	if (!chip->usb_psy) {
 		pr_err("usb supply not found deferring probe\n");
 		rc = -EPROBE_DEFER;
 		goto fail_chg_enable;
-	}
+	}*/
 
 	mutex_init(&chip->jeita_configure_lock);
 	spin_lock_init(&chip->usbin_health_monitor_lock);
@@ -5267,6 +5686,21 @@ qpnp_charger_probe(struct spmi_device *spmi)
 
 	if (ext_ovp_isns_present)
 		chip->ext_ovp_ic_gpio_enabled = 0;
+
+	//ASUS_BSP frank_tao +++
+	chip->usb_psy = power_supply_get_by_name("usb");
+	if (!chip->usb_psy) {
+		#if defined(ASUS_A600KL_PROJECT) || defined(ASUS_A500KL_PROJECT)
+		pm8226_register_usb();
+		#endif
+		chip->usb_psy = power_supply_get_by_name("usb");
+		if(!chip->usb_psy) {
+			pr_err("usb supply not found deferring probe\n");
+			rc = -EPROBE_DEFER;
+			goto fail_chg_enable;
+		}
+	}
+	//ASUS_BSP frank_tao ---
 
 	/*
 	 * Check if bat_if is set in DT and make sure VADC is present
@@ -5471,7 +5905,28 @@ qpnp_charger_probe(struct spmi_device *spmi)
 		chip->batt_psy.supplied_to = pm_batt_supplied_to;
 		chip->batt_psy.num_supplicants =
 				ARRAY_SIZE(pm_batt_supplied_to);
-
+//ASUS_BSP +++ frank_tao "add asus battery driver"
+#ifdef CONFIG_BATTERY_ASUS
+		local_chip = chip;
+		phone_bat = kzalloc(sizeof(struct asus_bat_phone_bat_struct), GFP_KERNEL);
+		if (!phone_bat) {
+			pr_err("[BAT] cannot allocate asus_bat_phone_bat_struct\n");
+			return -ENOMEM;
+		//TODO:  goto and free 
+		}
+		
+		phone_bat->phone_bat_power_supply_changed = api_phone_bat_power_supply_changed;
+		phone_bat->get_prop_bat_present_byhw = api_get_prop_batt_present;
+		phone_bat->get_prop_bat_capacity_byhw = api_get_prop_batt_capacity;
+		phone_bat->get_prop_bat_status_byhw = api_get_prop_batt_status;
+		phone_bat->get_prop_charge_type_byhw = api_get_prop_charge_type;
+		phone_bat->get_prop_batt_health_byhw = api_get_prop_batt_health;
+		phone_bat->get_prop_batt_volt_byhw = api_get_prop_batt_volt;
+		phone_bat->get_prop_batt_curr_byhw = api_get_prop_batt_curr;
+		
+		asus_bat_set_phone_bat(phone_bat);
+#endif /* CONFIG_BATTERY_ASUS */
+//ASUS_BSP --- frank_tao "add asus battery driver"
 		rc = power_supply_register(chip->dev, &chip->batt_psy);
 		if (rc < 0) {
 			pr_err("batt failed to register rc = %d\n", rc);

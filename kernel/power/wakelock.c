@@ -29,6 +29,28 @@ struct wakelock {
 };
 
 static struct rb_root wakelocks_tree = RB_ROOT;
+extern int pmsp_flag;
+extern void pmsp_print(void);
+void print_active_locks(void)
+{
+	struct rb_node *node;
+	struct wakelock *wl;
+
+	for (node = rb_first(&wakelocks_tree); node; node = rb_next(node)) {
+		wl = rb_entry(node, struct wakelock, node);
+		if (wl->ws.active == true) {
+			pr_info("[PM]active wake lock %s\n", wl->name);
+			ASUSEvtlog("[PM] active wake lock: %s\n", wl->name);
+        if (pmsp_flag == 1){ 
+        if(strncmp(wl->name, "PowerManagerService", strlen("PowerManagerService")) == 0)
+            pmsp_print();
+            }
+            pmsp_flag = 0;
+
+		}
+	}
+}
+
 
 ssize_t pm_show_wakelocks(char *buf, bool show_active)
 {

@@ -74,6 +74,11 @@ static long power_on_alarm;
 
 static int set_alarm_time_to_rtc(const long);
 
+//ASUS_BSP frank_tao +++
+static bool IsRtcReady = false; //ASUS BSP Eason_Chang
+bool g_RTC_update = false; //ASUS BSP Eason_Chang : In suspend have same cap don't update savedTime
+//ASUS_BSP frank_tao ---
+
 void set_power_on_alarm(long secs, bool enable)
 {
 	mutex_lock(&power_on_alarm_mutex);
@@ -276,6 +281,10 @@ int alarm_set_rtc(struct timespec new_time)
 	unsigned long flags;
 	struct rtc_time rtc_new_rtc_time;
 	struct timespec tmp_time;
+	struct rtc_time ori_tm,new_tm;
+	getnstimeofday(&tmp_time);
+    tmp_time.tv_sec -= sys_tz.tz_minuteswest * 60;
+    rtc_time_to_tm(tmp_time.tv_sec, &ori_tm);
 
 	rtc_time_to_tm(new_time.tv_sec, &rtc_new_rtc_time);
 
@@ -321,12 +330,40 @@ int alarm_set_rtc(struct timespec new_time)
 		pr_alarm(ERROR, "alarm_set_rtc: "
 			"Failed to set RTC, time will be lost on reboot\n");
 err:
+	        // ASUS_BSP+++ VictorFu "Add Event log"
+            getnstimeofday(&tmp_time);
+            tmp_time.tv_sec -= sys_tz.tz_minuteswest * 60;
+            rtc_time_to_tm(tmp_time.tv_sec, &new_tm);
+            ASUSEvtlog("[UTS] RTC update: Current Datatime: %04d-%02d-%02d %02d:%02d:%02d,Update Datatime: %04d-%02d-%02d %02d:%02d:%02d\r\n",
+                    ori_tm.tm_year + 1900,
+                    ori_tm.tm_mon + 1,
+                    ori_tm.tm_mday,
+                    ori_tm.tm_hour,
+                    ori_tm.tm_min,
+                    ori_tm.tm_sec,
+                    new_tm.tm_year + 1900,
+                    new_tm.tm_mon + 1,
+                    new_tm.tm_mday,
+                    new_tm.tm_hour,
+                    new_tm.tm_min,
+                    new_tm.tm_sec);
+            // ASUS_BSP--- VictorFu "Add Event log"
 	wake_unlock(&alarm_rtc_wake_lock);
 	mutex_unlock(&alarm_setrtc_mutex);
+	//ASUS_BSP frank_tao +++
+	IsRtcReady = true; //ASUS BSP Eason_Chang
+	g_RTC_update = true; //ASUS BSP Eason_Chang : In suspend have same cap don't update savedTime
+	//ASUS_BSP frank_tao ---
+	ASUSEvtlog("[UTS] Power on");
+	
 	return ret;
 }
 
-
+//ASUS_BSP frank_tao +++
+bool reportRtcReady(void){
+    return IsRtcReady;
+}   
+//ASUS_BSP frank_tao ---
 void
 alarm_update_timedelta(struct timespec tmp_time, struct timespec new_time)
 {
@@ -483,6 +520,7 @@ static int alarm_suspend(struct platform_device *pdev, pm_message_t state)
 			rtc_delta.tv_sec, rtc_delta.tv_nsec);
 		if (rtc_current_time + 1 >= rtc_alarm_time) {
 			pr_alarm(SUSPEND, "alarm about to go off\n");
+			ASUSEvtlog("[debug]alarm suspend busy\n");
 			rtc_time_to_tm(0, &rtc_alarm.time);
 			rtc_alarm.enabled = 0;
 			rtc_set_alarm(alarm_rtc_dev, &rtc_alarm);

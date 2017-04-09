@@ -396,6 +396,8 @@ static struct msm_cam_clk_info cam_8974_clk_info[] = {
 	[SENSOR_CAM_CLK] = {"cam_clk", 0},
 };
 
+extern  void asus_actuator_close(void);
+int isPowerup=0;
 int msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	struct msm_camera_power_ctrl_t *power_info;
@@ -408,6 +410,11 @@ int msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 		return -EINVAL;
 	}
 
+	if(isPowerup){
+		asus_actuator_close();
+	}
+	
+
 	power_info = &s_ctrl->sensordata->power_info;
 	sensor_device_type = s_ctrl->sensor_device_type;
 	sensor_i2c_client = s_ctrl->sensor_i2c_client;
@@ -417,6 +424,7 @@ int msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 			__func__, __LINE__, power_info, sensor_i2c_client);
 		return -EINVAL;
 	}
+	isPowerup=0;
 	return msm_camera_power_down(power_info, sensor_device_type,
 		sensor_i2c_client);
 }
@@ -456,6 +464,10 @@ int msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 	if (rc < 0)
 		msm_camera_power_down(power_info, s_ctrl->sensor_device_type,
 					sensor_i2c_client);
+
+	if(rc==0){
+		isPowerup=1;
+	}
 
 	return rc;
 }
@@ -722,14 +734,13 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 	case CFG_WRITE_I2C_ARRAY: {
 		struct msm_camera_i2c_reg_setting conf_array;
 		struct msm_camera_i2c_reg_array *reg_setting = NULL;
-
+		int i = 0;
 		if (s_ctrl->sensor_state != MSM_SENSOR_POWER_UP) {
 			pr_err("%s:%d failed: invalid state %d\n", __func__,
 				__LINE__, s_ctrl->sensor_state);
 			rc = -EFAULT;
 			break;
 		}
-
 		if (copy_from_user(&conf_array,
 			(void *)cdata->cfg.setting,
 			sizeof(struct msm_camera_i2c_reg_setting))) {
@@ -737,14 +748,11 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			rc = -EFAULT;
 			break;
 		}
-
-		if ((!conf_array.size) ||
-			(conf_array.size > I2C_USER_REG_DATA_MAX )) {
+		if (!conf_array.size) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
 		}
-
 		reg_setting = kzalloc(conf_array.size *
 			(sizeof(struct msm_camera_i2c_reg_array)), GFP_KERNEL);
 		if (!reg_setting) {
@@ -762,8 +770,29 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		}
 
 		conf_array.reg_setting = reg_setting;
-		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write_table(
-			s_ctrl->sensor_i2c_client, &conf_array);
+
+		if(conf_array.size == 0 || (reg_setting->reg_addr == 0 && reg_setting->reg_data == 1620)
+								|| (reg_setting->reg_addr == 0 && reg_setting->reg_data == 810)
+								|| (reg_setting->reg_addr == 0 && reg_setting->reg_data == 1392))
+		{
+			CDBG("Camera error reg_setting->reg_addr:=0x%x,0x%x\n",reg_setting->reg_addr,reg_setting->reg_data);
+			rc =0;
+		}
+		else
+		{
+			if (reg_setting->reg_addr == 0x15)
+			{
+				for (i=0;i<conf_array.size;i++)
+				{
+					s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(s_ctrl->sensor_i2c_client,reg_setting[i].reg_addr,reg_setting[i].reg_data,MSM_CAMERA_I2C_BYTE_ADDR);
+				}
+			} else {
+				//pr_err("Camera error reg_setting->reg_addr:=0x%x,0x%x\n",reg_setting->reg_addr,reg_setting->reg_data);
+				rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write_table(
+					s_ctrl->sensor_i2c_client, &conf_array);
+			}
+		}
+
 		kfree(reg_setting);
 		break;
 	}
@@ -913,8 +942,7 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			break;
 		}
 
-		if ((!conf_array.size) ||
-			(conf_array.size > I2C_USER_REG_DATA_MAX )) {
+		if (!conf_array.size) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;

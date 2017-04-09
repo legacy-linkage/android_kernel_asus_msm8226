@@ -22,6 +22,72 @@
 #include <linux/printk.h>
 #include <linux/dynamic_debug.h>
 #include <asm/byteorder.h>
+#include <linux/asusdebug.h>
+
+// +++ ASUS_BSP : add for miniporting
+typedef enum
+{
+	//A600KL and A500KL
+	A600KL_EVB 	= 0x0,
+	A600KL_EVB2 = 0x1,
+	A500KL_EVB1 = 0x2,
+	A500KL_SR 	= 0x3,
+	A500KL_SR2  = 0X4,
+	A500KL_ER1 	= 0x5,
+	A500KL_ER2 	= 0x6,
+	A500KL_ER3 	= 0x7,
+	A500KL_MP 	= 0x8,
+	A500KL_MP2 	= 0x9,
+	HWID_UNKNOWN = 0xFF
+} DEVICE_HWID;
+
+typedef enum
+{
+	HW_PROJECT_A600KL = 0x0,
+	HW_PROJECT_A500KL = 0x1,
+	HW_PROJECT_UNKNOWN = 0xFF
+} DEVICE_HW_PROJECT;
+
+typedef enum
+{
+	DDR_ELPIDA = 0,
+	DDR_HYNIX = 1,
+	DDR_SAMSUNG = 2,
+	DDR_HYNIX_LPDDR2 = 3,
+	DDR_ID_UNKNOWN
+} HW_DDR_TYPE;
+
+typedef enum
+{
+	DDR_SIZE_1G = 0,
+	DDR_SIZE_2G = 1,
+
+	DDR_SIZE_UNKNOWN
+} HW_DDR_SIZE;
+
+const DEVICE_HWID oem_hardware_id(void);
+const DEVICE_HW_PROJECT oem_hardware_project(void);
+extern DEVICE_HWID g_ASUS_hwID;
+extern int g_user_dbg_mode;//wendy4_wang@asus.com
+extern int g_user_klog_mode;//wendy4_wang@asus.com
+
+const HW_DDR_TYPE oem_hardware_ddr_type(void);
+const HW_DDR_SIZE oem_hardware_ddr_size(void);
+
+typedef enum
+{
+	MODEM_SKU_CN = 0,
+	MODEM_SKU_TW_APAC,
+	MODEM_SKU_EU_WW,
+	MODEM_SKU_TAI,
+	
+	MODEM_SKU_MAX
+} HW_MODEM_SKU;
+
+const HW_MODEM_SKU oem_modem_sku_type(void);
+void set_modem_sku_type_value(const HW_MODEM_SKU modem_sku);
+
+// --- ASUS_BSP : add for miniporting
 
 #define USHRT_MAX	((u16)(~0U))
 #define SHRT_MAX	((s16)(USHRT_MAX>>1))

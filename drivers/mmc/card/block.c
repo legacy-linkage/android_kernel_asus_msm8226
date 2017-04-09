@@ -1283,12 +1283,26 @@ static int mmc_blk_issue_discard_rq(struct mmc_queue *mq, struct request *req)
 	if (card->ext_csd.bkops_en)
 		card->bkops_info.sectors_changed += blk_rq_sectors(req);
 
-	if (mmc_can_discard(card))
+//ASUS_BSP +++ Lei_Guo "cmd5 stress test"
+	#ifdef CONFIG_MMC_CMD5TEST
+		if (card->host->cmd5test)
+			card->sectors_changed += blk_rq_sectors(req);
+	#endif
+//ASUS_BSP --- Lei_Guo "cmd5 stress test"
+//ASUS_BSP +++ Lei_Guo "add discard infomation"
+	if (mmc_can_discard(card)){
+		pr_info("[eMMC] mmc can discard, now use discard");
 		arg = MMC_DISCARD_ARG;
-	else if (mmc_can_trim(card))
+		}
+	else if (mmc_can_trim(card)){
+		pr_info("[eMMC] mmc cant discard but can trim, now use trim");
 		arg = MMC_TRIM_ARG;
-	else
+		}
+	else{
+		pr_info("[eMMC] mmc cant discard and trim, now use erase");
 		arg = MMC_ERASE_ARG;
+		}
+//ASUS_BSP --- Lei_Guo "add discard infomation"
 retry:
 	if (card->quirks & MMC_QUIRK_INAND_CMD38) {
 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
@@ -2213,6 +2227,12 @@ static u8 mmc_blk_prep_packed_list(struct mmc_queue *mq, struct request *req)
 			if (card->ext_csd.bkops_en)
 				card->bkops_info.sectors_changed +=
 					blk_rq_sectors(next);
+//ASUS_BSP +++ Lei_guo "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+			if (card->host->cmd5test)
+				card->sectors_changed += blk_rq_sectors(next);
+#endif
+//ASUS_BSP --- Lei_guo "cmd5 stress test"
 		}
 		list_add_tail(&next->queuelist, &mq->mqrq_cur->packed_list);
 		cur = next;
@@ -2455,6 +2475,12 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 	if (rqc) {
 		if ((card->ext_csd.bkops_en) && (rq_data_dir(rqc) == WRITE))
 			card->bkops_info.sectors_changed += blk_rq_sectors(rqc);
+//ASUS_BSP +++ Lei_Guo "cmd5 stress test"
+#ifdef CONFIG_MMC_CMD5TEST
+		if ((card->host->cmd5test) && (rq_data_dir(rqc) == WRITE))
+				card->sectors_changed += blk_rq_sectors(rqc);
+#endif
+//ASUS_BSP --- Lei_Guo "cmd5 stress test"
 		reqs = mmc_blk_prep_packed_list(mq, rqc);
 	}
 

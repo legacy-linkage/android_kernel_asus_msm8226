@@ -52,6 +52,10 @@
 #define VERSION "1.01"
 #define WCNSS_PIL_DEVICE "wcnss"
 
+//ASUS_BSP+++ "for wlan wakeup trace"
+int g_wcnss_wlanrx_irq = 0;
+//ASUS_BSP--- "for wlan wakeup trace"
+
 #define WCNSS_DISABLE_PC_LATENCY	100
 #define WCNSS_ENABLE_PC_LATENCY	PM_QOS_DEFAULT_VALUE
 #define WCNSS_PM_QOS_TIMEOUT	15000
@@ -1113,6 +1117,10 @@ static void wcnss_post_bootup(struct work_struct *work)
 	}
 
 	pr_info("%s: Cancel APPS vote for Iris & WCNSS\n", __func__);
+
+	//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
+	ASUSEvtlog("[wcnss]: wcnss_post_bootup, Cancel APPS vote for Iris & Riva.\n");
+	//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 
 	/* Since WCNSS is up, cancel any APPS vote for Iris & WCNSS VREGs  */
 	wcnss_wlan_power(&penv->pdev->dev, &penv->wlan_config,
@@ -2471,6 +2479,13 @@ wcnss_trigger_config(struct platform_device *pdev)
 		ret = -ENOENT;
 		goto fail_res;
 	}
+
+	//ASUS_BSP+++ "for wlan wakeup trace"
+	pr_info("[wcnss]: %s=%d.\n", (penv->tx_irq_res->name), (penv->tx_irq_res->start));
+	pr_info("[wcnss]: %s=%d.\n", (penv->rx_irq_res->name), (penv->rx_irq_res->start));
+	g_wcnss_wlanrx_irq = (int)(penv->rx_irq_res->start);
+	//ASUS_BSP--- "for wlan wakeup trace"
+
 	INIT_WORK(&penv->wcnssctrl_rx_work, wcnssctrl_rx_handler);
 	INIT_WORK(&penv->wcnssctrl_version_work, wcnss_send_version_req);
 	INIT_WORK(&penv->wcnss_pm_config_work, wcnss_send_pm_config);
@@ -2602,9 +2617,18 @@ wcnss_trigger_config(struct platform_device *pdev)
 		penv->pil = subsystem_get(WCNSS_PIL_DEVICE);
 		if (IS_ERR(penv->pil)) {
 			dev_err(&pdev->dev, "Peripheral Loader failed on WCNSS.\n");
+			//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
+			ASUSEvtlog("[wcnss]: Load WCNSS failed.\n");
+			//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 			ret = PTR_ERR(penv->pil);
 			wcnss_disable_pc_add_req();
 			wcnss_pronto_log_debug_regs();
+		} else {
+			printk("[wcnss]: Load WCNSS image ok.\n");
+
+			//ASUS_BSP+++ "for /data/log/ASUSEvtlog"
+			ASUSEvtlog("[wcnss]: Load WCNSS image ok.\n");
+			//ASUS_BSP--- "for /data/log/ASUSEvtlog"
 		}
 	} while (pil_retry++ < WCNSS_MAX_PIL_RETRY && IS_ERR(penv->pil));
 

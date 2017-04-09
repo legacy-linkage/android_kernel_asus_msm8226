@@ -22,6 +22,7 @@
  * and macros DECLARE_COMPLETION(), DECLARE_COMPLETION_ONSTACK(), and
  * INIT_COMPLETION().
  */
+#if 0 //ASUSDEBUG jeffery_hu@asus.com
 struct completion {
 	unsigned int done;
 	wait_queue_head_t wait;
@@ -29,7 +30,17 @@ struct completion {
 
 #define COMPLETION_INITIALIZER(work) \
 	{ 0, __WAIT_QUEUE_HEAD_INITIALIZER((work).wait) }
-
+//ASUSDEBUG + jeffery_hu@asus.com
+#else
+struct completion {
+	unsigned int done;
+	wait_queue_head_t wait;
+	char name[32];
+};
+#define COMPLETION_INITIALIZER(work) \
+	{ 0, __WAIT_QUEUE_HEAD_INITIALIZER((work).wait), #work }
+#endif
+//ASUSDEBUG -
 #define COMPLETION_INITIALIZER_ONSTACK(work) \
 	({ init_completion(&work); work; })
 
