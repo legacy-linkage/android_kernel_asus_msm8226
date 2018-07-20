@@ -510,6 +510,7 @@ CONFIG_NFC_QNCI=y
 CONFIG_CRYPTO_TWOFISH_COMMON=y
 # Random Number Generation
 CONFIG_CRYPTO_HW=y
+CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE=y
 # ASUS_BSP --- "add for Android secured VPN"
 # ASUS_BSP +++ "add for Android enabled VPN"
 CONFIG_TUN=y
